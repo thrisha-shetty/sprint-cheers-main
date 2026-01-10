@@ -1,18 +1,24 @@
 import { Employee, Badge, AwardType } from "@/types/employee";
 
+// UPDATED KEYS: v10 – org-wide damped scoring
 const STORAGE_KEYS = {
-  USERS: "sprintwise_users",
-  CURRENT_USER: "sprintwise_current_user",
-  EMPLOYEES: "sprintwise_employees",
-  NOMINATIONS: "sprintwise_nominations",
+  USERS: "sprintwise_users_v10",
+  CURRENT_USER: "sprintwise_current_user_v10",
+  EMPLOYEES: "sprintwise_employees_v10",
+  NOMINATIONS: "sprintwise_nominations_v10",
 };
 
-// Updated StoredUser (email removed, role added)
+// CONSTANTS
+const BASE_VOTE_VALUE = 50;
+
+// Global scaling factor (baseline ≈ 10-member team)
+const SCALING_FACTOR = 3.0;
+
 interface StoredUser {
   id: string;
-  name: string;       // employee name (used for login)
+  name: string;
   password: string;
-  role: string;       // admin | train-manager | employee
+  role: string;
 }
 
 interface StoredNomination {
@@ -25,75 +31,94 @@ interface StoredNomination {
   timestamp: string;
 }
 
-// Dummy employees initializer
-const initializeDummyEmployees = (): Employee[] => {
-  return [
-    {
-      id: "emp1",
-      name: "Sarah Johnson",
-      jobTitle: "Senior Frontend Developer",
-      profilePicture: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400",
-      badges: [],
-      totalScore: 0,
-    },
-    {
-      id: "emp2",
-      name: "John Doe",
-      jobTitle: "Backend Developer",
-      profilePicture: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400",
-      badges: [],
-      totalScore: 0,
-    },
-    {
-      id: "emp3",
-      name: "Mike Chen",
-      jobTitle: "Full Stack Developer",
-      profilePicture: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400",
-      badges: [],
-      totalScore: 0,
-    },
-    {
-      id: "emp4",
-      name: "Emily Brown",
-      jobTitle: "UX Designer",
-      profilePicture: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=400",
-      badges: [],
-      totalScore: 0,
-    },
-    {
-      id: "emp5",
-      name: "Alex Rodriguez",
-      jobTitle: "DevOps Engineer",
-      profilePicture: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400",
-      badges: [],
-      totalScore: 0,
-    },
-    {
-      id: "emp6",
-      name: "Lisa Park",
-      jobTitle: "QA Engineer",
-      profilePicture: "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?w=400",
-      badges: [],
-      totalScore: 0,
-    },
-  ];
-};
+// ---------- DUMMY DATA ----------
+const initializeDummyEmployees = (): Employee[] => [
+  // ENGINEERING (6)
+  {
+    id: "emp1",
+    name: "Sarah Johnson",
+    jobTitle: "Senior Frontend Developer",
+    department: "Engineering",
+    profilePicture: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400",
+    badges: [],
+    totalScore: 0,
+  },
+  {
+    id: "emp2",
+    name: "John Doe",
+    jobTitle: "Backend Developer",
+    department: "Engineering",
+    profilePicture: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400",
+    badges: [],
+    totalScore: 0,
+  },
+  {
+    id: "emp3",
+    name: "Mike Chen",
+    jobTitle: "Full Stack Developer",
+    department: "Engineering",
+    profilePicture: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400",
+    badges: [],
+    totalScore: 0,
+  },
+  {
+    id: "emp5",
+    name: "Alex Rodriguez",
+    jobTitle: "DevOps Engineer",
+    department: "Engineering",
+    profilePicture: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400",
+    badges: [],
+    totalScore: 0,
+  },
+  {
+    id: "emp7",
+    name: "David Lee",
+    jobTitle: "Mobile Developer",
+    department: "Engineering",
+    profilePicture: "https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=400",
+    badges: [],
+    totalScore: 0,
+  },
+  {
+    id: "emp8",
+    name: "Sophie Taylor",
+    jobTitle: "QA Engineer",
+    department: "Engineering",
+    profilePicture: "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=400",
+    badges: [],
+    totalScore: 0,
+  },
 
+  // DESIGN (2)
+  {
+    id: "emp4",
+    name: "Emily Brown",
+    jobTitle: "UX Designer",
+    department: "Design",
+    profilePicture: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=400",
+    badges: [],
+    totalScore: 0,
+  },
+  {
+    id: "emp6",
+    name: "Lisa Park",
+    jobTitle: "UI Designer",
+    department: "Design",
+    profilePicture: "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?w=400",
+    badges: [],
+    totalScore: 0,
+  },
+];
+
+// ---------- AUTH ----------
 export const auth = {
-  // SIGN UP
-  signup: (
-    name: string,
-    password: string,
-    role: string
-  ): { success: boolean; error?: string } => {
-    const users: StoredUser[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || "[]");
+  signup: (name: string, password: string, role: string) => {
+    const users: StoredUser[] =
+      JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || "[]");
 
-    // Check duplicate user with same name + role
-    if (users.find((u) => u.name === name && u.role === role)) {
-      return { success: false, error: "User already exists for this role" };
-    }
+    if (users.find(u => u.name === name)) return { success: true };
 
-    const newUser: StoredUser = {
+    const newUser = {
       id: `user_${Date.now()}`,
       name,
       password,
@@ -102,25 +127,18 @@ export const auth = {
 
     users.push(newUser);
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-
     return { success: true };
   },
 
-  // LOGIN
-  login: (
-    name: string,
-    password: string,
-    role: string
-  ): { success: boolean; error?: string; user?: StoredUser } => {
-    const users: StoredUser[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || "[]");
+  login: (name: string, password: string) => {
+    const users: StoredUser[] =
+      JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || "[]");
 
     const user = users.find(
-      (u) => u.name === name && u.password === password && u.role === role
+      u => u.name === name && u.password === password
     );
 
-    if (!user) {
-      return { success: false, error: "Invalid credentials" };
-    }
+    if (!user) return { success: false, error: "Invalid credentials" };
 
     localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
     return { success: true, user };
@@ -130,49 +148,59 @@ export const auth = {
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
   },
 
-  getCurrentUser: (): StoredUser | null => {
+  getCurrentUser: () => {
     const user = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
     return user ? JSON.parse(user) : null;
   },
 };
 
+// ---------- EMPLOYEES ----------
 export const employeeStorage = {
   getEmployees: (): Employee[] => {
     const stored = localStorage.getItem(STORAGE_KEYS.EMPLOYEES);
-
     if (!stored) {
-      const dummyEmployees = initializeDummyEmployees();
-      localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(dummyEmployees));
-      return dummyEmployees;
+      const dummy = initializeDummyEmployees();
+      localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(dummy));
+      return dummy;
     }
-
     return JSON.parse(stored);
-  },
-
-  updateEmployeeScore: (employeeId: string, scoreToAdd: number) => {
-    const employees = employeeStorage.getEmployees();
-    const employee = employees.find((e) => e.id === employeeId);
-
-    if (employee) {
-      employee.totalScore += scoreToAdd;
-      localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(employees));
-    }
   },
 };
 
+// ---------- NOMINATIONS ----------
 export const nominationStorage = {
   getNominations: (): StoredNomination[] => {
     const stored = localStorage.getItem(STORAGE_KEYS.NOMINATIONS);
     return stored ? JSON.parse(stored) : [];
   },
 
-  // NEW FUNCTION: Check if user has already nominated for a specific award type
-  hasUserNominatedForAward: (nominatorId: string, awardType: AwardType): boolean => {
+  hasUserNominatedForAward: (nominatorId: string, awardType: AwardType) => {
     const nominations = nominationStorage.getNominations();
-    // Return true if any nomination exists with same nominator and same award type
     return nominations.some(
-      (n) => n.nominatorId === nominatorId && n.awardType === awardType
+      n => n.nominatorId === nominatorId && n.awardType === awardType
     );
+  },
+
+  getNominationsForEmployee: (employeeId: string): Badge[] => {
+    const nominations = nominationStorage.getNominations();
+    const users: StoredUser[] =
+      JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || "[]");
+
+    return nominations
+      .filter(n => n.nomineeId === employeeId)
+      .map(n => {
+        const nominator = users.find(u => u.id === n.nominatorId);
+        return {
+          id: n.id,
+          type: n.awardType,
+          givenBy: nominator?.name || "Unknown",
+          givenById: n.nominatorId,
+          comment: n.comment,
+          rating: n.rating,
+          timestamp: n.timestamp,
+          reactions: [],
+        };
+      });
   },
 
   addNomination: (
@@ -183,6 +211,39 @@ export const nominationStorage = {
     rating: number
   ) => {
     const nominations = nominationStorage.getNominations();
+    const employees = employeeStorage.getEmployees();
+
+    const nominee = employees.find(e => e.id === nomineeId);
+    if (!nominee) return null;
+
+    // Prevent self-nomination
+    const users: StoredUser[] =
+      JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || "[]");
+    const nominator = users.find(u => u.id === nominatorId);
+
+    if (nominator && nominator.name === nominee.name) {
+      console.warn("Self-nomination blocked.");
+      return null;
+    }
+
+    // ---------- DAMPED SCORING (ORG-WIDE) ----------
+    const teamSize = employees.length; // TOTAL company size
+    const potentialVoters = Math.max(1, teamSize - 1);
+
+    const fairnessMultiplier =
+      SCALING_FACTOR / Math.sqrt(potentialVoters);
+
+    const weightedPoints = Math.round(
+      BASE_VOTE_VALUE * fairnessMultiplier
+    );
+
+    console.log(
+      `[Damped Logic] Employees: ${teamSize}, ` +
+      `Voters: ${potentialVoters}, ` +
+      `Sqrt: ${Math.sqrt(potentialVoters).toFixed(2)}, ` +
+      `Multiplier: ${fairnessMultiplier.toFixed(2)}x, ` +
+      `Points: ${weightedPoints}`
+    );
 
     const newNomination: StoredNomination = {
       id: `nom_${Date.now()}`,
@@ -197,31 +258,9 @@ export const nominationStorage = {
     nominations.push(newNomination);
     localStorage.setItem(STORAGE_KEYS.NOMINATIONS, JSON.stringify(nominations));
 
-    // Update employee score
-    employeeStorage.updateEmployeeScore(nomineeId, rating * 10);
+    nominee.totalScore += weightedPoints;
+    localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(employees));
 
     return newNomination;
-  },
-
-  getNominationsForEmployee: (employeeId: string): Badge[] => {
-    const nominations = nominationStorage.getNominations();
-    const users: StoredUser[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || "[]");
-
-    return nominations
-      .filter((n) => n.nomineeId === employeeId)
-      .map((n) => {
-        const nominator = users.find((u) => u.id === n.nominatorId);
-
-        return {
-          id: n.id,
-          type: n.awardType,
-          givenBy: nominator?.name || "Unknown",
-          givenById: n.nominatorId,
-          comment: n.comment,
-          rating: n.rating,
-          timestamp: new Date(n.timestamp),
-          reactions: [],
-        };
-      });
   },
 };

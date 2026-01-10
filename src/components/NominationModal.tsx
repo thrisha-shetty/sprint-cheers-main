@@ -29,7 +29,8 @@ export const NominationModal = ({
   employee,
   awardType,
 }: NominationModalProps) => {
-  const [rating, setRating] = useState(5);
+  // Rating is now fixed at 5
+  const rating = 5; 
   const [comment, setComment] = useState("");
   const [hasAlreadyVoted, setHasAlreadyVoted] = useState(false);
 
@@ -67,7 +68,7 @@ export const NominationModal = ({
       return;
     }
 
-    // Save nomination
+    // Save nomination (Rating is always 5)
     nominationStorage.addNomination(
       employee.id,
       user.id,
@@ -77,10 +78,9 @@ export const NominationModal = ({
     );
 
     toast.success(`Nomination sent to ${employee.name}!`, {
-      description: `${awardType} • ${rating} stars • +${rating * 10} points`,
+      description: `${awardType} • ${rating} stars applied`,
     });
     
-    setRating(5);
     setComment("");
     onClose();
   };
@@ -124,35 +124,31 @@ export const NominationModal = ({
         ) : (
           // NORMAL FORM VIEW
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Rating */}
-            <div className="space-y-2">
-              <Label>Rating</Label>
-              <div className="flex gap-2">
+            
+            {/* Visual Rating Display (Fixed) */}
+            <div className="bg-amber-50 border border-amber-100 rounded-lg p-4 flex flex-col items-center justify-center space-y-2">
+              <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
+                Recognition Level
+              </span>
+              <div className="flex gap-1">
                 {[1, 2, 3, 4, 5].map((star) => (
-                  <button
+                  <Star
                     key={star}
-                    type="button"
-                    onClick={() => setRating(star)}
-                    className="transition-smooth hover:scale-110"
-                  >
-                    <Star
-                      className={`w-8 h-8 ${
-                        star <= rating
-                          ? "text-accent fill-accent"
-                          : "text-muted-foreground"
-                      }`}
-                    />
-                  </button>
+                    className="w-8 h-8 text-amber-400 fill-amber-400"
+                  />
                 ))}
               </div>
+              <p className="text-sm text-amber-600 font-medium">
+                Highest Honor (5 Stars)
+              </p>
             </div>
 
             {/* Comment */}
             <div className="space-y-2">
-              <Label htmlFor="comment">Comment</Label>
+              <Label htmlFor="comment">Why do they deserve this?</Label>
               <Textarea
                 id="comment"
-                placeholder="Share why they deserve this award..."
+                placeholder="Share a specific example of their work..."
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 required
@@ -164,7 +160,7 @@ export const NominationModal = ({
               <Button type="button" variant="outline" onClick={onClose}>
                 Cancel
               </Button>
-              <Button type="submit" className="gradient-hero gap-2">
+              <Button type="submit" className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white gap-2">
                 <Send className="w-4 h-4" />
                 Send Nomination
               </Button>

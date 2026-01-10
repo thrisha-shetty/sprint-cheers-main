@@ -1,117 +1,75 @@
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardFooter } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Employee, AwardType } from "@/types/employee";
-import { Award, Star } from "lucide-react";
-import { awardCategories } from "@/data/mockData";
+import { Trophy, Star, Users, Lock } from "lucide-react";
 
 interface EmployeeCardProps {
   employee: Employee;
-  onNominate: (employee: Employee, awardType: AwardType) => void;
+  onNominate: (employee: Employee) => void;
   preselectedAward?: AwardType | null;
+  isDisabled?: boolean; // New prop for self-check
 }
 
-export const EmployeeCard = ({ employee, onNominate, preselectedAward }: EmployeeCardProps) => {
+export const EmployeeCard = ({ employee, onNominate, preselectedAward, isDisabled }: EmployeeCardProps) => {
   return (
-    <div className="group relative bg-card rounded-lg border shadow-card hover-lift transition-smooth cursor-pointer p-6">
-      <div className="flex items-start gap-4">
-        <Avatar className="w-16 h-16 border-2 border-primary">
-          <AvatarImage src={employee.profilePicture} alt={employee.name} />
-          <AvatarFallback>{employee.name.slice(0, 2).toUpperCase()}</AvatarFallback>
-        </Avatar>
-        
-        <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-lg truncate">{employee.name}</h3>
-          <p className="text-sm text-muted-foreground truncate">{employee.jobTitle}</p>
-          
-          <div className="flex items-center gap-2 mt-2">
-            <div className="flex items-center gap-1 text-sm">
-              <Star className="w-4 h-4 text-accent fill-accent" />
-              <span className="font-medium">{employee.totalScore}</span>
-            </div>
-            <div className="flex items-center gap-1 text-sm text-muted-foreground">
-              <Award className="w-4 h-4" />
-              <span>{employee.badges.length} badges</span>
-            </div>
+    <Card className={`hover-lift overflow-hidden border-slate-200 group relative transition-all ${isDisabled ? 'opacity-80' : ''}`}>
+      
+      {/* BLUR OVERLAY for Self */}
+      {isDisabled && (
+        <div className="absolute inset-0 z-20 bg-white/40 backdrop-blur-[2px] flex items-center justify-center cursor-not-allowed">
+          <div className="bg-slate-800/90 text-white text-xs font-bold py-1.5 px-4 rounded-full flex items-center gap-2 shadow-xl animate-in fade-in zoom-in duration-300">
+            <Lock className="w-3 h-3" />
+            <span>It's You! 
+              You can't nominate yourself</span>
           </div>
         </div>
-      </div>
-
-      {/* Badges */}
-      {employee.badges.length > 0 && (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {employee.badges.slice(0, 3).map((badge) => {
-            const category = awardCategories.find((c) => c.type === badge.type);
-            return (
-              <Badge
-                key={badge.id}
-                variant="secondary"
-                className="text-xs"
-                style={{
-                  backgroundColor: category?.color ? `${category.color}20` : undefined,
-                  borderColor: category?.color,
-                }}
-              >
-                {badge.type}
-              </Badge>
-            );
-          })}
-          {employee.badges.length > 3 && (
-            <Badge variant="outline" className="text-xs">
-              +{employee.badges.length - 3} more
-            </Badge>
-          )}
-        </div>
       )}
-
-      {/* Nominate Button Overlay */}
-      <div 
-        className="absolute inset-0 bg-primary/90 rounded-lg opacity-0 group-hover:opacity-100 transition-smooth flex items-center justify-center"
-        onClick={() => {
-          if (preselectedAward) {
-            onNominate(employee, preselectedAward);
-          }
-        }}
-      >
-        <div className="text-center text-primary-foreground space-y-3">
-          <Award className="w-12 h-12 mx-auto" />
-          <p className="font-semibold text-lg">
-            Nominate {employee.name.split(" ")[0]}
-          </p>
-          {preselectedAward ? (
-            <>
-              <p className="text-sm opacity-90">For {preselectedAward}</p>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onNominate(employee, preselectedAward);
-                }}
-                className="px-4 py-2 rounded-full bg-primary-foreground text-primary font-medium hover:scale-105 transition-smooth"
-              >
-                Nominate
-              </button>
-            </>
-          ) : (
-            <>
-              <p className="text-sm opacity-90">Click to select an award</p>
-              <div className="flex flex-wrap justify-center gap-2 mt-4 px-4">
-                {awardCategories.slice(0, 4).map((category) => (
-                  <button
-                    key={category.type}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onNominate(employee, category.type);
-                    }}
-                    className="px-3 py-1 rounded-full bg-primary-foreground text-primary text-xs font-medium hover:scale-105 transition-smooth"
-                  >
-                    {category.type}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+      
+      <div className="h-24 bg-gradient-to-r from-slate-100 to-slate-200 relative">
+        <div className="absolute -bottom-10 left-6">
+          <Avatar className="w-20 h-20 border-4 border-white shadow-md">
+            <AvatarImage src={employee.profilePicture} alt={employee.name} className="object-cover" />
+            <AvatarFallback>{employee.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+          </Avatar>
         </div>
       </div>
-    </div>
+      <CardContent className="pt-12 pb-4 px-6">
+        <div className="flex justify-between items-start mb-2">
+          <div>
+            <h3 className="font-bold text-lg text-slate-900">{employee.name}</h3>
+            <p className="text-sm text-muted-foreground">{employee.jobTitle}</p>
+            <div className="flex items-center gap-1 mt-1 text-xs text-slate-500 font-medium bg-slate-100 px-2 py-0.5 rounded-full w-fit">
+              <Users className="w-3 h-3" />
+              {employee.department || "General"}
+            </div>
+          </div>
+          <div className="flex flex-col items-end">
+            <div className="flex items-center text-amber-500 font-bold">
+              <Star className="w-4 h-4 fill-current mr-1" />
+              {employee.totalScore}
+            </div>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Points</p>
+          </div>
+        </div>
+        
+        <div className="flex gap-2 mt-4">
+          <Badge variant="secondary" className="bg-slate-100 text-slate-600">
+            <Trophy className="w-3 h-3 mr-1" />
+            {employee.badges.length} Awards
+          </Badge>
+        </div>
+      </CardContent>
+      <CardFooter className="bg-slate-50/50 p-4">
+        <Button 
+          className="w-full bg-white border-2 border-indigo-600 text-indigo-600 hover:bg-indigo-600 hover:text-white transition-all font-semibold disabled:opacity-50 disabled:hover:bg-white disabled:hover:text-indigo-600 disabled:cursor-not-allowed"
+          onClick={() => onNominate(employee)}
+          disabled={isDisabled}
+        >
+          {isDisabled ? "Can't Nominate Self" : (preselectedAward ? `Nominate for ${preselectedAward}` : "Nominate")}
+        </Button>
+      </CardFooter>
+    </Card>
   );
 };

@@ -1,50 +1,32 @@
-export interface Employee {
-  id: string;
-  name: string;
-  jobTitle: string;
-  profilePicture: string;
-  badges: Badge[];
-  totalScore: number;
-}
+// Please verify this list matches your existing award categories exactly.
+// If you had custom awards, add them here.
+export type AwardType = 
+  | "Culture Champion"
+  | "Bug Slayer"
+  | "Team Player"
+  | "Innovator"
+  | "Customer Hero"
+  | "Early Bird"
+  | "Night Owl"
+  | "Code Wizard";
 
 export interface Badge {
   id: string;
   type: AwardType;
   givenBy: string;
-  givenById: string;
+  givenById?: string;
   comment: string;
   rating: number;
-  timestamp: Date;
-  reactions: Reaction[];
+  timestamp: string | Date;
+  reactions: Array<{ emoji: string; count: number }>;
 }
 
-export interface Reaction {
-  userId: string;
-  emoji: string;
-}
-
-export type AwardType =
-  | "Bug Slayer"
-  | "Collaboration Champ"
-  | "Customer Obsessed"
-  | "Documentation Dynamo"
-  | "Innovation Driver"
-  | "Most Improved"
-  | "Quality Guardian"
-  | "Sprint Hero";
-
-export interface AwardCategory {
-  type: AwardType;
-  icon: string;
-  color: string;
-  description: string;
-}
-
-export type UserRole = "Employee" | "Team Lead" | "Admin";
-
-export interface User {
+export interface Employee {
   id: string;
   name: string;
-  email: string;
-  role: UserRole;
+  jobTitle: string;
+  department: string; // This field is required for the new Fairness Logic
+  profilePicture: string;
+  badges: Badge[];
+  totalScore: number;
 }

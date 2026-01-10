@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { 
   Award, LogOut, Trophy, X, Vote, Users, TrendingUp, 
   ArrowLeft, Zap, Calendar, Star, Sparkles, Heart, Activity,
-  Globe, Briefcase, Crown, Medal, Loader2
+  Globe, Briefcase, Crown, Medal, Loader2, Info
 } from "lucide-react";
 import { AwardCategoryCard } from "@/components/AwardCategoryCard";
 import { EmployeeCard } from "@/components/EmployeeCard";
@@ -26,6 +26,7 @@ const Home = () => {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
+  const [allActivity, setAllActivity] = useState<any[]>([]); // New state for full history
   const [topLeader, setTopLeader] = useState<Employee | null>(null);
   const [topPerformers, setTopPerformers] = useState<Employee[]>([]); 
   const [userStats, setUserStats] = useState({
@@ -41,10 +42,9 @@ const Home = () => {
   const [filterAward, setFilterAward] = useState<AwardType | null>(null);
 
   useEffect(() => {
-    // STANDARD AUTH CHECK
     const user = auth.getCurrentUser();
     if (!user) {
-      navigate("/"); // Send back to login if no user
+      navigate("/");
     } else {
       setCurrentUser(user);
     }
@@ -73,17 +73,13 @@ const Home = () => {
     }));
     setEmployees(employeesWithBadges);
 
-    // 2. Calculate Top Leader & Top 3 (Sort by Badge Count then Score)
+    // 2. Calculate Top Leader & Top 3
     const sortedByRank = [...employeesWithBadges].sort((a, b) => {
-      // Primary sort: Badge Count
-      if (b.badges.length !== a.badges.length) {
-        return b.badges.length - a.badges.length;
-      }
-      // Secondary sort: Total Score
-      return b.totalScore - a.totalScore;
+      if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
+      if (b.badges.length !== a.badges.length) return b.badges.length - a.badges.length;
+      return a.name.localeCompare(b.name);
     });
     
-    // Set the top employee as the leader
     if (sortedByRank.length > 0) {
       setTopLeader(sortedByRank[0]);
       setTopPerformers(sortedByRank.slice(0, 3)); 
@@ -98,7 +94,6 @@ const Home = () => {
       myBadges = myEmployeeRecord.badges;
     }
 
-    // Count nominations made by ME
     let nominationsMadeCount = 0;
     employeesWithBadges.forEach(emp => {
       emp.badges.forEach(badge => {
@@ -108,7 +103,6 @@ const Home = () => {
       });
     });
 
-    // Calculate Avg Rating Received
     const totalStars = myBadges.reduce((acc, curr) => acc + curr.rating, 0);
     const avgRating = myBadges.length > 0 ? (totalStars / myBadges.length).toFixed(1) : "0.0";
 
@@ -129,9 +123,10 @@ const Home = () => {
 
     const sortedActivity = allBadges.sort((a, b) => 
       new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    ).slice(0, 10); 
+    );
 
-    setRecentActivity(sortedActivity);
+    setAllActivity(sortedActivity);
+    setRecentActivity(sortedActivity.slice(0, 10));
   };
 
   const handleLogout = () => {
@@ -141,12 +136,37 @@ const Home = () => {
   };
 
   const handleNominate = (employee: Employee, awardType: AwardType) => {
+    // Basic check, though they should be hidden now
+    if (currentUser && currentUser.name === employee.name) {
+      return;
+    }
+
     setSelectedEmployee(employee);
     setSelectedAward(awardType);
     setIsNominationOpen(true);
   };
 
-  const filteredEmployees = employees.filter((emp) => emp.id !== currentUser?.id);
+  // Filter out the current user so they don't appear in the list
+  // Using Name comparison as Auth ID and Mock Employee ID might not match in this demo
+  const filteredEmployees = employees.filter((emp) => emp.name !== currentUser?.name);
+
+  // Helper for rendering rank in Top Performers
+  const renderRankIcon = (index: number, score: number, allTop: Employee[]) => {
+    let rank = 1;
+    if (index > 0 && score < allTop[index - 1].totalScore) {
+      rank = index + 1;
+    } else if (index > 0 && score === allTop[index - 1].totalScore) {
+      if (index === 1) rank = 1;
+      if (index === 2) {
+         rank = allTop[1].totalScore === allTop[0].totalScore ? 1 : 2;
+      }
+    }
+
+    if (rank === 1) return '🥇';
+    if (rank === 2) return '🥈';
+    if (rank === 3) return '🥉';
+    return `#${rank}`;
+  };
 
   if (!currentUser || isLoading) {
     return (
@@ -161,7 +181,6 @@ const Home = () => {
 
   return (
     <div className="min-h-screen bg-slate-50/50 relative overflow-hidden">
-      
       {/* Background Decor */}
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
         <div className="absolute top-0 left-1/4 w-96 h-96 bg-purple-200/30 rounded-full blur-3xl" />
@@ -169,10 +188,9 @@ const Home = () => {
         <div className="absolute top-0 left-0 w-full h-full opacity-20 bg-repeat [background-size:100px_100px] [background-image:radial-gradient(#000_1px,transparent_1px)]" />
       </div>
 
-      {/* Header - UPDATED WITH USER INFO */}
+      {/* Header */}
       <header className="border-b bg-white/80 backdrop-blur-md sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          {/* Logo Section */}
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-purple-500/20 text-white">
               <Sparkles className="w-5 h-5" />
@@ -182,7 +200,6 @@ const Home = () => {
             </h1>
           </div>
 
-          {/* User Profile Section */}
           <div className="flex items-center gap-4">
             <div className="text-right hidden sm:block">
               <p className="text-sm font-semibold text-gray-900 leading-none mb-1">{currentUser.name}</p>
@@ -190,9 +207,7 @@ const Home = () => {
                 {currentUser.role || 'Team Member'}
               </Badge>
             </div>
-            
             <div className="h-8 w-px bg-slate-200 hidden sm:block" />
-            
             <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground hover:text-red-500 hover:bg-red-50">
               <LogOut className="w-4 h-4 sm:mr-2" />
               <span className="hidden sm:inline">Logout</span>
@@ -203,7 +218,6 @@ const Home = () => {
 
       <main className="container mx-auto px-4 py-8 space-y-8">
 
-        {/* --- VIEW 1: DASHBOARD --- */}
         {view === 'dashboard' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 space-y-8">
             
@@ -228,68 +242,145 @@ const Home = () => {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               
-              {/* Left Column: Stats, Overview, & Actions */}
               <div className="lg:col-span-2 space-y-8">
+
+                {/* 2. Quick Actions */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-amber-500" /> Quick Actions
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div 
+                      onClick={() => setView('nomination')}
+                      className="group relative cursor-pointer overflow-hidden rounded-2xl bg-white border border-slate-200 p-6 shadow-sm hover:shadow-xl hover:border-purple-200 transition-all duration-300"
+                    >
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-purple-500/5 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
+                      <div className="relative z-10">
+                        <div className="w-12 h-12 bg-purple-100 text-purple-600 rounded-xl flex items-center justify-center mb-4 group-hover:rotate-6 transition-transform">
+                          <Vote size={24} />
+                        </div>
+                        <h3 className="text-xl font-bold text-gray-900 mb-2">Nominate Peer</h3>
+                        <p className="text-sm text-gray-500 mb-6">Recognize amazing work. Make someone's day special.</p>
+                        <div className="flex items-center justify-between mt-auto">
+                          <span className="text-xs font-medium text-purple-600 bg-purple-50 px-2 py-1 rounded-md">
+                            Avg time: 1 min
+                          </span>
+                          <div className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transform translate-x-4 group-hover:translate-x-0 transition-all">
+                            →
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div 
+                      onClick={() => navigate('/leaderboard')}
+                      className="group relative cursor-pointer overflow-hidden rounded-2xl bg-white border border-slate-200 p-6 shadow-sm hover:shadow-xl hover:border-orange-200 transition-all duration-300"
+                    >
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-orange-500/5 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
+                      <div className="relative z-10">
+                        <div className="w-12 h-12 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center mb-4 group-hover:-rotate-6 transition-transform">
+                          <Trophy size={24} />
+                        </div>
+                        <h3 className="text-xl font-bold text-gray-900 mb-2">Leaderboard</h3>
+                        <p className="text-sm text-gray-500 mb-6">See who's leading the charts this month.</p>
+                        <div className="flex items-center justify-between mt-auto">
+                          <span className="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-1 rounded-md">
+                            Top: {topLeader?.name.split(' ')[0] || 'None'}
+                          </span>
+                          <div className="w-8 h-8 rounded-full bg-orange-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transform translate-x-4 group-hover:translate-x-0 transition-all">
+                            →
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
                 
-                {/* 2. User Stats Row */}
+                {/* 3. User Stats Row */}
                 <div className="grid grid-cols-3 gap-4">
-                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center justify-center text-center hover:shadow-md transition-all group">
+                  <div className="relative bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center justify-center text-center hover:shadow-md transition-all group cursor-help">
                     <div className="mb-2 p-2 bg-yellow-50 text-yellow-600 rounded-full group-hover:scale-110 transition-transform">
                       <Trophy size={20} />
                     </div>
                     <span className="text-2xl font-bold text-gray-900">{userStats.badgesEarned}</span>
                     <span className="text-xs text-muted-foreground font-medium">Badges Earned</span>
+                    <div className="absolute -top-12 w-48 bg-slate-800 text-white text-[10px] p-2 rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
+                      Total awards you have received from your peers.
+                      <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-800 rotate-45"></div>
+                    </div>
                   </div>
-                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center justify-center text-center hover:shadow-md transition-all group">
+
+                  <div className="relative bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center justify-center text-center hover:shadow-md transition-all group cursor-help">
                     <div className="mb-2 p-2 bg-blue-50 text-blue-600 rounded-full group-hover:scale-110 transition-transform">
                       <Vote size={20} />
                     </div>
                     <span className="text-2xl font-bold text-gray-900">{userStats.nominationsMade}</span>
                     <span className="text-xs text-muted-foreground font-medium">Votes Cast</span>
+                    <div className="absolute -top-12 w-48 bg-slate-800 text-white text-[10px] p-2 rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
+                      Number of times you have recognized other team members.
+                      <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-800 rotate-45"></div>
+                    </div>
                   </div>
-                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center justify-center text-center hover:shadow-md transition-all group">
+
+                  <div className="relative bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center justify-center text-center hover:shadow-md transition-all group cursor-help">
                     <div className="mb-2 p-2 bg-green-50 text-green-600 rounded-full group-hover:scale-110 transition-transform">
                       <Star size={20} />
                     </div>
                     <span className="text-2xl font-bold text-gray-900">{userStats.avgRating}</span>
                     <span className="text-xs text-muted-foreground font-medium">Avg Rating</span>
+                    <div className="absolute -top-12 w-48 bg-slate-800 text-white text-[10px] p-2 rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
+                      Average star rating from the awards you have received.
+                      <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-800 rotate-45"></div>
+                    </div>
                   </div>
                 </div>
 
-                {/* 3. Team Overview Block */}
+                {/* 4. Team Overview Block */}
                 <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
                   <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2">
                     <Activity className="w-4 h-4" /> Organization Pulse
                   </h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 divide-x divide-slate-100">
-                    <div className="flex flex-col items-center justify-center text-center px-2">
+                    <div className="relative group flex flex-col items-center justify-center text-center px-2 cursor-help">
                       <div className="text-2xl font-bold text-gray-900">{employees.length}</div>
                       <div className="text-xs text-muted-foreground font-medium flex items-center gap-1 mt-1">
                         <Users className="w-3 h-3" /> Total Employees
                       </div>
+                      <div className="absolute -top-10 bg-slate-800 text-white text-[10px] p-2 rounded shadow opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 w-32">
+                        Total registered members.
+                      </div>
                     </div>
-                    <div className="flex flex-col items-center justify-center text-center px-2">
+                    <div className="relative group flex flex-col items-center justify-center text-center px-2 cursor-help">
                       <div className="text-2xl font-bold text-gray-900">3</div>
                       <div className="text-xs text-muted-foreground font-medium flex items-center gap-1 mt-1">
                         <Globe className="w-3 h-3" /> Countries
                       </div>
+                      <div className="absolute -top-10 bg-slate-800 text-white text-[10px] p-2 rounded shadow opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 w-32">
+                        Global office locations.
+                      </div>
                     </div>
-                    <div className="flex flex-col items-center justify-center text-center px-2">
+                    <div className="relative group flex flex-col items-center justify-center text-center px-2 cursor-help">
                       <div className="text-2xl font-bold text-emerald-600">{Math.max(0, employees.length - 2)}</div>
                       <div className="text-xs text-muted-foreground font-medium flex items-center gap-1 mt-1">
                         <Zap className="w-3 h-3" /> Active Today
                       </div>
+                      <div className="absolute -top-10 bg-slate-800 text-white text-[10px] p-2 rounded shadow opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 w-32">
+                        Users online in 24h.
+                      </div>
                     </div>
-                    <div className="flex flex-col items-center justify-center text-center px-2">
+                    <div className="relative group flex flex-col items-center justify-center text-center px-2 cursor-help">
                       <div className="text-2xl font-bold text-gray-900">6</div>
                       <div className="text-xs text-muted-foreground font-medium flex items-center gap-1 mt-1">
                         <Briefcase className="w-3 h-3" /> Teams
+                      </div>
+                      <div className="absolute -top-10 bg-slate-800 text-white text-[10px] p-2 rounded shadow opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 w-32">
+                        Active departments.
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* 4. Top Performers Preview */}
+                {/* 5. Top Performers Preview */}
                 <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm relative overflow-hidden">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-bold text-gray-900 flex items-center gap-2">
@@ -304,8 +395,8 @@ const Home = () => {
                     {topPerformers.map((emp, index) => (
                       <div key={emp.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors">
                          <div className="flex items-center gap-3">
-                           <div className="flex items-center justify-center w-6 font-bold text-slate-400">
-                              {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`}
+                           <div className="flex items-center justify-center w-6 font-bold text-slate-400 text-xl">
+                              {renderRankIcon(index, emp.totalScore, topPerformers)}
                            </div>
                            <img src={emp.profilePicture} alt={emp.name} className="w-8 h-8 rounded-full object-cover border border-white shadow-sm" />
                            <div>
@@ -324,66 +415,9 @@ const Home = () => {
                   </div>
                 </div>
 
-                {/* 5. Improved Quick Actions */}
-                <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-amber-500" /> Quick Actions
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Nomination Card */}
-                  <div 
-                    onClick={() => setView('nomination')}
-                    className="group relative cursor-pointer overflow-hidden rounded-2xl bg-white border border-slate-200 p-6 shadow-sm hover:shadow-xl hover:border-purple-200 transition-all duration-300"
-                  >
-                    <div className="absolute top-0 right-0 w-24 h-24 bg-purple-500/5 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
-                    
-                    <div className="relative z-10">
-                      <div className="w-12 h-12 bg-purple-100 text-purple-600 rounded-xl flex items-center justify-center mb-4 group-hover:rotate-6 transition-transform">
-                        <Vote size={24} />
-                      </div>
-                      <h3 className="text-xl font-bold text-gray-900 mb-2">Nominate Peer</h3>
-                      <p className="text-sm text-gray-500 mb-6">Recognize amazing work. Make someone's day special.</p>
-                      
-                      <div className="flex items-center justify-between mt-auto">
-                        <span className="text-xs font-medium text-purple-600 bg-purple-50 px-2 py-1 rounded-md">
-                          Avg time: 1 min
-                        </span>
-                        <div className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transform translate-x-4 group-hover:translate-x-0 transition-all">
-                          →
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Leaderboard Card */}
-                  <div 
-                    onClick={() => navigate('/leaderboard')}
-                    className="group relative cursor-pointer overflow-hidden rounded-2xl bg-white border border-slate-200 p-6 shadow-sm hover:shadow-xl hover:border-orange-200 transition-all duration-300"
-                  >
-                    <div className="absolute top-0 right-0 w-24 h-24 bg-orange-500/5 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
-                    
-                    <div className="relative z-10">
-                      <div className="w-12 h-12 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center mb-4 group-hover:-rotate-6 transition-transform">
-                        <Trophy size={24} />
-                      </div>
-                      <h3 className="text-xl font-bold text-gray-900 mb-2">Leaderboard</h3>
-                      <p className="text-sm text-gray-500 mb-6">See who's leading the charts this month.</p>
-                      
-                      <div className="flex items-center justify-between mt-auto">
-                        <span className="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-1 rounded-md">
-                          {/* UPDATED: Now displays the actual topLeader name */}
-                          Top: {topLeader?.name.split(' ')[0] || 'None'}
-                        </span>
-                        <div className="w-8 h-8 rounded-full bg-orange-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transform translate-x-4 group-hover:translate-x-0 transition-all">
-                          →
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
               </div>
 
-              {/* Right Column: Recent Feed (Span 1) */}
+              {/* Right Column: Recent Feed */}
               <div className="lg:col-span-1">
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm h-full flex flex-col">
                   <div className="p-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white rounded-t-2xl z-10">
@@ -427,7 +461,6 @@ const Home = () => {
                             </div>
                             <p className="text-[10px] text-muted-foreground mt-1.5 flex items-center gap-1">
                               <Calendar size={10} />
-                              {/* Simple date formatting fallback */}
                               {new Date(item.timestamp).toLocaleDateString()}
                             </p>
                           </div>
@@ -437,7 +470,12 @@ const Home = () => {
                   </div>
                   
                   <div className="p-3 border-t border-slate-100 text-center">
-                    <Button variant="ghost" size="sm" className="text-xs w-full text-muted-foreground">
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="text-xs w-full text-muted-foreground hover:text-indigo-600"
+                      onClick={() => setView('history')}
+                    >
                       View All History
                     </Button>
                   </div>
@@ -448,10 +486,8 @@ const Home = () => {
           </div>
         )}
 
-        {/* --- VIEW 2: NOMINATION FLOW --- */}
         {view === 'nomination' && (
           <div className="animate-in fade-in slide-in-from-right-8 duration-500">
-            
             <Button 
               variant="ghost" 
               className="mb-6 pl-0 hover:bg-transparent hover:text-primary group" 
@@ -498,14 +534,90 @@ const Home = () => {
                 </p>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredEmployees.map((employee) => (
+                {filteredEmployees.map((employee) => ( // Using filteredEmployees to Hide Self
                   <EmployeeCard
                     key={employee.id}
                     employee={employee}
                     onNominate={filterAward ? (emp) => handleNominate(emp, filterAward) : handleNominate}
                     preselectedAward={filterAward}
+                    isDisabled={false} // No longer needed visually as they are removed
                   />
                 ))}
+              </div>
+            </section>
+          </div>
+        )}
+
+        {view === 'history' && (
+          <div className="animate-in fade-in slide-in-from-right-8 duration-500">
+            <Button 
+              variant="ghost" 
+              className="mb-6 pl-0 hover:bg-transparent hover:text-primary group" 
+              onClick={() => setView('dashboard')}
+            >
+              <ArrowLeft className="mr-2 h-4 w-4 group-hover:-translate-x-1 transition-transform" />
+              Back to Dashboard
+            </Button>
+
+            <section>
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold flex items-center gap-2">
+                  <Activity className="w-6 h-6 text-blue-500" /> Activity History
+                </h2>
+                <Badge variant="outline" className="text-muted-foreground">
+                  {allActivity.length} Total Records
+                </Badge>
+              </div>
+              
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="divide-y divide-slate-100">
+                  {allActivity.length === 0 ? (
+                    <div className="text-center py-12 text-muted-foreground">
+                      No activity history found.
+                    </div>
+                  ) : (
+                    allActivity.map((item) => (
+                      <div key={item.id} className="p-6 hover:bg-slate-50/50 transition-colors flex gap-4 items-start">
+                         <div className="relative shrink-0">
+                            <img 
+                              src={item.receiverImg} 
+                              alt="Avatar" 
+                              className="w-12 h-12 rounded-full object-cover border border-slate-100"
+                            />
+                            <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5 shadow-sm">
+                              <Heart className="w-4 h-4 text-red-500 fill-red-500" />
+                            </div>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="text-base text-gray-900">
+                                  <span className="font-semibold">{item.givenBy}</span> recognized <span className="font-semibold">{item.receiverName}</span>
+                                </p>
+                                {item.comment && (
+                                  <p className="text-sm text-muted-foreground mt-1 italic">"{item.comment}"</p>
+                                )}
+                              </div>
+                              <span className="text-xs text-muted-foreground whitespace-nowrap ml-4">
+                                {new Date(item.timestamp).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
+                              </span>
+                            </div>
+                            
+                            <div className="flex items-center gap-3 mt-3">
+                              <Badge variant="outline" className="px-2 py-0.5 bg-blue-50 text-blue-700 border-blue-200">
+                                {item.type}
+                              </Badge>
+                              <div className="flex text-yellow-400 items-center gap-1" title={`${item.rating} Stars`}>
+                                {[...Array(item.rating)].map((_, i) => (
+                                  <Star key={i} size={14} fill="currentColor" />
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </section>
           </div>
@@ -517,8 +629,8 @@ const Home = () => {
         isOpen={isNominationOpen}
         onClose={() => {
           setIsNominationOpen(false);
-          fetchData(); // Refresh data immediately
-          setView('dashboard'); // Return to dashboard
+          fetchData(); 
+          setView('dashboard'); 
         }}
         employee={selectedEmployee}
         awardType={selectedAward}
