@@ -3,15 +3,14 @@ import { Toaster } from "@/components/ui/sonner";
 import Login from "./pages/Login";
 import Home from "./pages/Home";
 import Leaderboard from "./pages/Leaderboard";
+import AdminDashboard from "./pages/AdminDashboard";
+import ManagerDashboard from "./pages/ManagerDashboard";
+import { auth } from "@/lib/localStorage"; 
 
-// Simple route guard
-const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  // We check purely for the existence of user data in localStorage for simplicity
-  const isAuthenticated = !!localStorage.getItem("sprintwise_current_user");
-  
-  if (!isAuthenticated) {
-    return <Navigate to="/" replace />;
-  }
+const ProtectedRoute = ({ children, role }: { children: React.ReactNode, role?: string }) => {
+  const user = auth.getCurrentUser();
+  if (!user) return <Navigate to="/" replace />;
+  if (role && user.role !== role) return <Navigate to="/home" replace />;
   return <>{children}</>;
 };
 
@@ -19,27 +18,16 @@ const App = () => {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Public Route */}
         <Route path="/" element={<Login />} />
+        <Route path="/home" element={<ProtectedRoute><Home /></ProtectedRoute>} />
+        <Route path="/leaderboard" element={<ProtectedRoute><Leaderboard /></ProtectedRoute>} />
         
-        {/* Protected Routes */}
-        <Route path="/home" element={
-          <ProtectedRoute>
-            <Home />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="/leaderboard" element={
-          <ProtectedRoute>
-            <Leaderboard />
-          </ProtectedRoute>
-        } />
+        {/* NEW ROUTES */}
+        <Route path="/admin" element={<ProtectedRoute role="admin"><AdminDashboard /></ProtectedRoute>} />
+        <Route path="/manager" element={<ProtectedRoute role="train-manager"><ManagerDashboard /></ProtectedRoute>} />
 
-        {/* Catch all - redirect to login */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-      
-      {/* Toast notifications */}
       <Toaster />
     </BrowserRouter>
   );
