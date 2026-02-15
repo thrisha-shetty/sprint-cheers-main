@@ -1,25 +1,36 @@
 import { Employee, Badge, AwardType } from "@/types/employee";
 
-// Keeping version consistent
+// VERSION UPDATE: _v48 (Fixing Syntax Error & Missing Exports)
 const STORAGE_KEYS = {
-  USERS: "sprintwise_users_v26",
-  CURRENT_USER: "sprintwise_current_user_v26",
-  EMPLOYEES: "sprintwise_employees_v26",
-  NOMINATIONS: "sprintwise_nominations_v26",
-  SPRINTS: "sprintwise_sprints_v26",
+  USERS: "sprintwise_users_v48",
+  CURRENT_USER: "sprintwise_current_user_v48",
+  EMPLOYEES: "sprintwise_employees_v48",
+  NOMINATIONS: "sprintwise_nominations_v48",
+  SPRINTS: "sprintwise_sprints_v48",
+  ARTS: "sprintwise_arts_v48",
+  TEAMS: "sprintwise_teams_v48",
+  AWARDS: "sprintwise_awards_v48",
+  NOTIFICATIONS: "sprintwise_notifications_v48",
 };
 
 const BASE_VOTE_VALUE = 50; 
 const SCALING_FACTOR = 3.0;
 
+export type UserRole = 'admin' | 'art-manager' | 'employee';
+export type UserStatus = 'pending' | 'approved' | 'rejected';
+
 export interface StoredUser {
   id: string;
-  name: string;
+  firstName: string;
+  lastName: string;
   password: string;
-  role: string;
-  needsPasswordChange?: boolean;
+  role: UserRole;
+  status: UserStatus;
+  needsPasswordChange: boolean;
+  artId?: string; 
+  teamId?: string; 
+  createdAt: string;
   createdBy?: string;
-  createdAt?: string;
 }
 
 export interface StoredNomination {
@@ -40,162 +51,296 @@ export interface StoredSprint {
   status: 'locked' | 'active' | 'completed';
 }
 
+export interface StoredAward {
+    id: string;
+    type: string;
+    icon: string;
+    color: string;
+    description: string;
+    points: number;
+}
+
+export interface ART {
+  id: string;
+  name: string;
+  department: string;
+  managerId: string;
+}
+
+export interface Team {
+  id: string;
+  artId: string;
+  name: string;
+  description: string;
+}
+
+// --- HELPER: Safe JSON Parsing ---
+const safeParse = <T>(key: string, fallback: T): T => {
+  try {
+    const item = localStorage.getItem(key);
+    return item ? JSON.parse(item) : fallback;
+  } catch (error) {
+    console.error(`Error parsing ${key}`, error);
+    return fallback;
+  }
+};
+
+// --- INITIALIZATION ---
+const initializeDefaultAwards = (): StoredAward[] => [
+    { type: "Culture Champion", icon: "Heart", color: "#e11d48", description: "Promoting positive team culture", points: 50, id: "aw_1" },
+    { type: "Bug Slayer", icon: "Sword", color: "#dc2626", description: "Fixing critical issues", points: 30, id: "aw_2" },
+    { type: "Team Player", icon: "Users", color: "#2563eb", description: "Helping others succeed", points: 40, id: "aw_3" },
+    { type: "Innovator", icon: "Lightbulb", color: "#d97706", description: "Creative solutions", points: 60, id: "aw_4" },
+    { type: "Customer Hero", icon: "Smile", color: "#059669", description: "Going above and beyond for clients", points: 50, id: "aw_5" },
+    { type: "Early Bird", icon: "Sunrise", color: "#f59e0b", description: "First to start, always prepared", points: 20, id: "aw_6" },
+    { type: "Night Owl", icon: "Moon", color: "#4338ca", description: "Dedication beyond standard hours", points: 20, id: "aw_7" },
+    { type: "Code Wizard", icon: "Wand2", color: "#7c3aed", description: "Exceptional technical problem solving", points: 45, id: "aw_8" },
+];
+
 const initializeDefaultSprints = (): StoredSprint[] => {
   const currentYear = new Date().getFullYear();
   return [
-    { id: "sprint_1", title: "Sprint 1 (Jan-Mar)", startDate: new Date(currentYear, 0, 1).toISOString(), endDate: new Date(currentYear, 3, 0, 23, 59, 59).toISOString(), status: 'completed' },
-    { id: "sprint_2", title: "Sprint 2 (Apr-Jun)", startDate: new Date(currentYear, 3, 1).toISOString(), endDate: new Date(currentYear, 6, 0, 23, 59, 59).toISOString(), status: 'active' },
+    { id: "sprint_1", title: "Sprint 1 (Jan-Mar)", startDate: new Date(currentYear, 0, 1).toISOString(), endDate: new Date(currentYear, 3, 0, 23, 59, 59).toISOString(), status: 'active' },
+    { id: "sprint_2", title: "Sprint 2 (Apr-Jun)", startDate: new Date(currentYear, 3, 1).toISOString(), endDate: new Date(currentYear, 6, 0, 23, 59, 59).toISOString(), status: 'locked' },
     { id: "sprint_3", title: "Sprint 3 (Jul-Sep)", startDate: new Date(currentYear, 6, 1).toISOString(), endDate: new Date(currentYear, 9, 0, 23, 59, 59).toISOString(), status: 'locked' },
     { id: "sprint_4", title: "Sprint 4 (Oct-Dec)", startDate: new Date(currentYear, 9, 1).toISOString(), endDate: new Date(currentYear, 12, 0, 23, 59, 59).toISOString(), status: 'locked' },
   ];
 };
 
-const initializeDefaultUsers = (): StoredUser[] => {
+const initializeDefaults = () => {
   const now = new Date().toISOString();
-  return [
-    { id: "user_admin", name: "Admin", password: "admin123", role: "admin", needsPasswordChange: false, createdAt: now },
-    { id: "user_manager", name: "Steven Strange", password: "password123", role: "train-manager", needsPasswordChange: false, createdAt: now },
-    { id: "user_sarah", name: "Sarah Johnson", password: "password123", role: "employee", needsPasswordChange: false, createdAt: now },
-    { id: "user_john", name: "John Doe", password: "password123", role: "employee", needsPasswordChange: false, createdAt: now },
-  ];
+  
+  // Create default users if they don't exist
+  if (!localStorage.getItem(STORAGE_KEYS.USERS)) {
+    const defaultUsers: StoredUser[] = [
+      { id: "user_admin_john", firstName: "John", lastName: "Doe", password: "John@123", role: "admin", status: "approved", needsPasswordChange: false, createdAt: now },
+      { id: "user_manager", firstName: "Steven", lastName: "Strange", password: "password123", role: "art-manager", status: "approved", needsPasswordChange: false, createdAt: now },
+      { id: "user_sarah", firstName: "Sarah", lastName: "Johnson", password: "password123", role: "employee", status: "approved", needsPasswordChange: false, createdAt: now }
+    ];
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(defaultUsers));
+  }
+
+  // Ensure other defaults exist
+  if (!localStorage.getItem(STORAGE_KEYS.AWARDS)) localStorage.setItem(STORAGE_KEYS.AWARDS, JSON.stringify(initializeDefaultAwards()));
+  if (!localStorage.getItem(STORAGE_KEYS.SPRINTS)) localStorage.setItem(STORAGE_KEYS.SPRINTS, JSON.stringify(initializeDefaultSprints()));
+  if (!localStorage.getItem(STORAGE_KEYS.ARTS)) localStorage.setItem(STORAGE_KEYS.ARTS, JSON.stringify([]));
+  if (!localStorage.getItem(STORAGE_KEYS.TEAMS)) localStorage.setItem(STORAGE_KEYS.TEAMS, JSON.stringify([]));
+  if (!localStorage.getItem(STORAGE_KEYS.EMPLOYEES)) localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify([]));
+  if (!localStorage.getItem(STORAGE_KEYS.NOMINATIONS)) localStorage.setItem(STORAGE_KEYS.NOMINATIONS, JSON.stringify([]));
 };
 
-const initializeDummyEmployees = (): Employee[] => {
-  return [
-    { id: "emp1", name: "Sarah Johnson", jobTitle: "Senior Frontend Developer", department: "Engineering", profilePicture: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400", badges: [], totalScore: 0 },
-    { id: "emp2", name: "John Doe", jobTitle: "Backend Developer", department: "Engineering", profilePicture: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400", badges: [], totalScore: 0 },
-    { id: "emp3", name: "Mike Chen", jobTitle: "Full Stack Developer", department: "Engineering", profilePicture: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400", badges: [], totalScore: 0 },
-    { id: "emp5", name: "Alex Rodriguez", jobTitle: "DevOps Engineer", department: "Engineering", profilePicture: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400", badges: [], totalScore: 0 },
-    { id: "emp7", name: "David Lee", jobTitle: "Mobile Developer", department: "Engineering", profilePicture: "https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=400", badges: [], totalScore: 0 },
-    { id: "emp8", name: "Sophie Taylor", jobTitle: "QA Engineer", department: "Engineering", profilePicture: "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=400", badges: [], totalScore: 0 },
-    { id: "emp9", name: "Ryan Cole", jobTitle: "Security Engineer", department: "Engineering", profilePicture: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400", badges: [], totalScore: 0 },
-    { id: "emp10", name: "James Wilson", jobTitle: "Frontend Developer", department: "Engineering", profilePicture: "https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=400", badges: [], totalScore: 0 },
-    { id: "emp11", name: "Maria Garcia", jobTitle: "Backend Developer", department: "Engineering", profilePicture: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400", badges: [], totalScore: 0 },
-    { id: "emp12", name: "Robert Chen", jobTitle: "Data Engineer", department: "Engineering", profilePicture: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400", badges: [], totalScore: 0 },
-    { id: "emp13", name: "Linda Wang", jobTitle: "Site Reliability Engineer", department: "Engineering", profilePicture: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400", badges: [], totalScore: 0 },
-    { id: "emp14", name: "Kevin Scott", jobTitle: "System Architect", department: "Engineering", profilePicture: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400", badges: [], totalScore: 0 },
-    { id: "emp4", name: "Emily Brown", jobTitle: "UX Designer", department: "Design", profilePicture: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=400", badges: [], totalScore: 0 },
-    { id: "emp6", name: "Lisa Park", jobTitle: "UI Designer", department: "Design", profilePicture: "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?w=400", badges: [], totalScore: 0 },
-    { id: "emp15", name: "Anna Kim", jobTitle: "Graphic Designer", department: "Design", profilePicture: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400", badges: [], totalScore: 0 },
-    { id: "emp16", name: "Tom Baker", jobTitle: "Product Designer", department: "Design", profilePicture: "https://images.unsplash.com/photo-1504257432389-52343af06ae3?w=400", badges: [], totalScore: 0 },
-    { id: "emp17", name: "Rachel Green", jobTitle: "UX Researcher", department: "Design", profilePicture: "https://images.unsplash.com/photo-1520813792240-56fc4a3765a7?w=400", badges: [], totalScore: 0 },
-    { id: "emp18", name: "Gary White", jobTitle: "Motion Designer", department: "Design", profilePicture: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400", badges: [], totalScore: 0 },
-    { id: "emp19", name: "Steven Strange", jobTitle: "Product Manager", department: "Product", profilePicture: "https://images.unsplash.com/photo-1560250097-0b93528c311a?w=400", badges: [], totalScore: 0 },
-    { id: "emp20", name: "Natasha Romanoff", jobTitle: "Product Owner", department: "Product", profilePicture: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=400", badges: [], totalScore: 0 },
-    { id: "emp21", name: "Bruce Banner", jobTitle: "Business Analyst", department: "Product", profilePicture: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400", badges: [], totalScore: 0 },
-    { id: "emp22", name: "Tony Stark", jobTitle: "Strategy Lead", department: "Product", profilePicture: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=400", badges: [], totalScore: 0 },
-    { id: "emp23", name: "Peter Parker", jobTitle: "Content Strategist", department: "Marketing", profilePicture: "https://images.unsplash.com/photo-1500048993953-d23a436266cf?w=400", badges: [], totalScore: 0 },
-    { id: "emp24", name: "Wanda Maximoff", jobTitle: "Social Media Manager", department: "Marketing", profilePicture: "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=400", badges: [], totalScore: 0 },
-    { id: "emp25", name: "Clint Barton", jobTitle: "SEO Specialist", department: "Marketing", profilePicture: "https://images.unsplash.com/photo-1542909168-82c3e7fdca5c?w=400", badges: [], totalScore: 0 },
-  ];
-};
-
+// --- AUTH ACTIONS ---
 export const auth = {
-  // ... (keeping existing auth functions createManager, createEmployee, signup, login, changePassword, logout, getCurrentUser)
-  createManager: (adminUser: StoredUser, name: string, password: string) => {
-    if (adminUser.role !== 'admin') return { success: false, error: "Unauthorized" };
-    const users: StoredUser[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || "[]");
-    if (users.find(u => u.name === name)) return { success: false, error: "User exists" };
-    users.push({ id: `user_${Date.now()}`, name, password, role: 'train-manager', needsPasswordChange: true, createdBy: adminUser.id, createdAt: new Date().toISOString() });
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-    return { success: true };
+  getCurrentUser: () => {
+    const u = sessionStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+    if (!u) return null;
+    const sessionUser = JSON.parse(u);
+    const allUsers = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
+    return allUsers.find(u => u.id === sessionUser.id) || sessionUser;
   },
-  createEmployee: (managerUser: StoredUser, name: string, password: string, dept: string, title: string) => {
-    if (managerUser.role !== 'train-manager' && managerUser.role !== 'admin') return { success: false, error: "Unauthorized" };
-    const users: StoredUser[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || "[]");
-    if (users.find(u => u.name === name)) return { success: false, error: "User exists" };
-    users.push({ id: `user_${Date.now()}`, name, password, role: 'employee', needsPasswordChange: true, createdBy: managerUser.id, createdAt: new Date().toISOString() });
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-    const employees = employeeStorage.getEmployees();
-    employees.push({ id: `emp_${Date.now()}`, name, jobTitle: title, department: dept, profilePicture: `https://ui-avatars.com/api/?name=${name.replace(' ', '+')}&background=random`, badges: [], totalScore: 0 });
-    localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(employees));
-    return { success: true };
-  },
-  signup: (name: string, password: string, role: string) => {
-    const users: StoredUser[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || "[]");
-    if (users.find((u) => u.name.toLowerCase() === name.toLowerCase())) return { success: false, error: "User already exists." };
-    if (name === "Admin" && role === "admin") {
-         const newUser = { id: `user_${Date.now()}`, name, password, role, needsPasswordChange: false };
-         users.push(newUser);
-         localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-         return { success: true };
+  
+  signup: (firstName: string, lastName: string, password: string, role: UserRole) => {
+    initializeDefaults();
+    const users = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
+    
+    if (users.some(u => u.firstName.toLowerCase() === firstName.toLowerCase() && u.lastName.toLowerCase() === lastName.toLowerCase())) {
+        return { success: false, error: "User already exists." };
     }
-    const newUser = { id: `user_${Date.now()}`, name, password, role, needsPasswordChange: false };
+    
+    const isSuperAdmin = firstName.toLowerCase() === 'john' && lastName.toLowerCase() === 'doe' && role === 'admin';
+
+    const newUser: StoredUser = { 
+      id: `user_${Date.now()}`, 
+      firstName: firstName.trim(), 
+      lastName: lastName.trim(), 
+      password, 
+      role, 
+      status: isSuperAdmin ? 'approved' : 'pending',
+      needsPasswordChange: false,
+      createdAt: new Date().toISOString() 
+    };
+    
     users.push(newUser);
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
     return { success: true };
   },
-  login: (name: string, password: string, selectedRole: string) => {
-    let users: StoredUser[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || "[]");
-    if (users.length === 0) {
-        users = initializeDefaultUsers();
-        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-    }
-    const user = users.find((u) => u.name === name && u.password === password);
+
+  login: (firstName: string, lastName: string, password: string, selectedRole: UserRole) => {
+    initializeDefaults();
+    const users = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
+    
+    const user = users.find(u => 
+        u.firstName.toLowerCase() === firstName.toLowerCase() && 
+        u.lastName.toLowerCase() === lastName.toLowerCase() && 
+        u.password === password
+    );
+
     if (!user) return { success: false, error: "Invalid credentials" };
-    if (user.role !== selectedRole) return { success: false, error: `Incorrect Role: You are registered as a "${user.role}", not "${selectedRole}".` };
+    
+    if (user.role !== selectedRole) return { success: false, error: "Incorrect portal selection" };
+    
+    if (user.status === 'pending') return { success: false, error: "Your account is pending approval." };
+    if (user.status === 'rejected') return { success: false, error: "Your account request was declined." };
+
     sessionStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
     return { success: true, user };
   },
+
+  logout: () => sessionStorage.removeItem(STORAGE_KEYS.CURRENT_USER),
+
   changePassword: (userId: string, newPassword: string) => {
-    const users: StoredUser[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || "[]");
+    const users = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
     const index = users.findIndex(u => u.id === userId);
     if (index !== -1) {
         users[index].password = newPassword;
         users[index].needsPasswordChange = false;
         localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-        sessionStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(users[index]));
         return { success: true };
     }
     return { success: false, error: "User not found" };
   },
-  logout: () => {
-    sessionStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-  },
-  getCurrentUser: () => {
-    const user = sessionStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-    return user ? JSON.parse(user) : null;
-  },
+
   getUsersCreatedBy: (creatorId: string) => {
-    const users: StoredUser[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || "[]");
+    const users = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
     return users.filter(u => u.createdBy === creatorId);
+  },
+
+  createManager: (adminUser: StoredUser, firstName: string, lastName: string) => {
+    const users = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
+    if (users.find(u => u.firstName === firstName && u.lastName === lastName)) return { success: false, error: "User exists" };
+    
+    users.push({ 
+        id: `user_${Date.now()}`, firstName, lastName, password: "password123", role: 'art-manager', 
+        status: 'approved', needsPasswordChange: true, createdBy: adminUser.id, createdAt: new Date().toISOString() 
+    });
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+    return { success: true };
+  },
+
+  createEmployee: (managerUser: StoredUser, firstName: string, lastName: string, dept: string, title: string) => {
+    const users = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
+    if (users.find(u => u.firstName === firstName && u.lastName === lastName)) return { success: false, error: "User exists" };
+    
+    const newUserId = `user_${Date.now()}`;
+    users.push({ 
+        id: newUserId, firstName, lastName, password: "password123", role: 'employee', 
+        status: 'approved', needsPasswordChange: true, createdBy: managerUser.id, createdAt: new Date().toISOString() 
+    });
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+
+    const employees = safeParse<Employee[]>(STORAGE_KEYS.EMPLOYEES, []);
+    employees.push({
+        id: newUserId,
+        name: `${firstName} ${lastName}`,
+        jobTitle: title,
+        department: dept,
+        profilePicture: `https://ui-avatars.com/api/?name=${firstName}+${lastName}&background=random`,
+        badges: [],
+        totalScore: 0
+    });
+    localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(employees));
+    return { success: true };
+  },
+};
+
+// --- ADMIN ACTIONS ---
+export const adminActions = {
+  getAllUsers: () => safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []),
+
+  getPendingRequests: (roles: UserRole[]) => {
+    const users = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
+    return users.filter(u => u.status === 'pending' && roles.includes(u.role));
+  },
+  
+  approveUser: (userId: string) => {
+    const users = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
+    const idx = users.findIndex(u => u.id === userId);
+    if (idx !== -1) {
+        users[idx].status = 'approved';
+        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+        return true;
+    }
+    return false;
+  },
+  
+  rejectUser: (userId: string) => {
+    const users = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
+    const idx = users.findIndex(u => u.id === userId);
+    if (idx !== -1) {
+        users[idx].status = 'rejected';
+        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+        return true;
+    }
+    return false;
   }
 };
 
-export const sprintStorage = {
-    getSprints: (): StoredSprint[] => {
-        const stored = localStorage.getItem(STORAGE_KEYS.SPRINTS);
-        if (!stored) {
-            const defaults = initializeDefaultSprints();
-            localStorage.setItem(STORAGE_KEYS.SPRINTS, JSON.stringify(defaults));
-            return defaults;
-        }
-        return JSON.parse(stored);
-    },
-    updateSprint: (sprint: StoredSprint) => {
-        const sprints = sprintStorage.getSprints();
-        const index = sprints.findIndex(s => s.id === sprint.id);
-        if (index !== -1) {
-            sprints[index] = sprint;
-            localStorage.setItem(STORAGE_KEYS.SPRINTS, JSON.stringify(sprints));
-        }
-    },
+// --- ART MANAGER ACTIONS ---
+export const artManagerActions = {
+  getPendingEmployees: () => safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []).filter(u => u.role === 'employee' && u.status === 'pending'),
+  approveEmployee: (userId: string, artId: string) => {
+    const users = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
+    const idx = users.findIndex(u => u.id === userId);
+    if (idx !== -1) {
+      users[idx].status = 'approved';
+      users[idx].artId = artId;
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+      return true;
+    }
+    return false;
+  },
+  createART: (name: string, department: string, managerId: string) => {
+    const arts = safeParse<ART[]>(STORAGE_KEYS.ARTS, []);
+    arts.push({ id: `art_${Date.now()}`, name, department, managerId });
+    localStorage.setItem(STORAGE_KEYS.ARTS, JSON.stringify(arts));
+  },
+  getARTs: () => safeParse<ART[]>(STORAGE_KEYS.ARTS, []),
+  createTeam: (artId: string, name: string, description: string) => {
+    const teams = safeParse<Team[]>(STORAGE_KEYS.TEAMS, []);
+    teams.push({ id: `team_${Date.now()}`, artId, name, description });
+    localStorage.setItem(STORAGE_KEYS.TEAMS, JSON.stringify(teams));
+  },
+  getTeams: () => safeParse<Team[]>(STORAGE_KEYS.TEAMS, []),
+  deleteTeam: (id: string) => {
+    const teams = safeParse<Team[]>(STORAGE_KEYS.TEAMS, []).filter(t => t.id !== id);
+    localStorage.setItem(STORAGE_KEYS.TEAMS, JSON.stringify(teams));
+  },
+  getEnrollmentCount: (teamId: string) => {
+    const users = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
+    return users.filter(u => u.teamId === teamId).length;
+  }
 };
 
-export const employeeStorage = {
-  getEmployees: (): Employee[] => {
-    const stored = localStorage.getItem(STORAGE_KEYS.EMPLOYEES);
-    if (!stored) {
-      const dummyEmployees = initializeDummyEmployees();
-      localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(dummyEmployees));
-      return dummyEmployees;
+// --- EMPLOYEE ACTIONS ---
+export const employeeActions = {
+  joinTeam: (userId: string, teamId: string) => {
+    const users = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
+    const idx = users.findIndex(u => u.id === userId);
+    if (idx !== -1) {
+      users[idx].teamId = teamId;
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+      return true;
     }
-    return JSON.parse(stored);
+    return false;
   },
-  
-  // NEW: Update Profile Picture
+  getTeamPeers: (teamId: string, myId: string) => {
+    const users = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
+    return users
+      .filter(u => u.teamId === teamId && u.id !== myId)
+      .map(u => ({
+        id: u.id,
+        name: `${u.firstName} ${u.lastName}`,
+        department: "Team Member",
+        profilePicture: `https://ui-avatars.com/api/?name=${u.firstName}+${u.lastName}&background=random`
+      }));
+  }
+};
+
+// --- STORAGES ---
+export const employeeStorage = {
+  getEmployees: () => safeParse<Employee[]>(STORAGE_KEYS.EMPLOYEES, []),
   updateProfilePicture: (employeeId: string, photoBase64: string) => {
-      const employees = employeeStorage.getEmployees();
+      const employees = safeParse<Employee[]>(STORAGE_KEYS.EMPLOYEES, []);
       const index = employees.findIndex(e => e.id === employeeId);
       if (index !== -1) {
           employees[index].profilePicture = photoBase64;
@@ -206,40 +351,88 @@ export const employeeStorage = {
   }
 };
 
-export const nominationStorage = {
-  getNominations: (): StoredNomination[] => {
-    const stored = localStorage.getItem(STORAGE_KEYS.NOMINATIONS);
-    return stored ? JSON.parse(stored) : [];
-  },
-  getNominationsForEmployee: (employeeId: string): Badge[] => {
-    const nominations = nominationStorage.getNominations();
-    const users: StoredUser[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || "[]");
-    return nominations.filter((n) => n.nomineeId === employeeId).map((n) => {
-        const nominator = users.find((u) => u.id === n.nominatorId);
-        return { id: n.id, type: n.awardType, givenBy: nominator?.name || "Unknown", givenById: n.nominatorId, comment: n.comment, rating: n.rating, timestamp: n.timestamp, reactions: [] };
+export const sprintStorage = {
+  getSprints: () => safeParse<StoredSprint[]>(STORAGE_KEYS.SPRINTS, []),
+  addSprint: (title: string) => {
+    const sprints = safeParse<StoredSprint[]>(STORAGE_KEYS.SPRINTS, []);
+    sprints.push({ 
+        id: `sp_${Date.now()}`, 
+        title, 
+        startDate: new Date().toISOString(), 
+        endDate: new Date().toISOString(), 
+        status: 'active' 
     });
+    localStorage.setItem(STORAGE_KEYS.SPRINTS, JSON.stringify(sprints));
+  }
+};
+
+export const awardStorage = {
+  getAwards: () => safeParse<StoredAward[]>(STORAGE_KEYS.AWARDS, []),
+  addAward: (type: string, description: string) => {
+    const awards = safeParse<StoredAward[]>(STORAGE_KEYS.AWARDS, []);
+    awards.push({ id: `aw_${Date.now()}`, type, description, icon: 'Star', color: '#6366f1', points: 50 });
+    localStorage.setItem(STORAGE_KEYS.AWARDS, JSON.stringify(awards));
   },
-  hasUserNominatedForAward: (nominatorId: string, awardType: AwardType): boolean => {
-    const nominations = nominationStorage.getNominations();
-    return nominations.some((n) => n.nominatorId === nominatorId && n.awardType === awardType);
-  },
-  addNomination: (nomineeId: string, nominatorId: string, awardType: AwardType, comment: string, rating: number) => {
-    const nominations = nominationStorage.getNominations();
-    const employees = employeeStorage.getEmployees();
-    const nominee = employees.find(e => e.id === nomineeId);
-    if (!nominee) return; 
-    const users: StoredUser[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || "[]");
-    const nominator = users.find(u => u.id === nominatorId);
-    if (nominator && nominator.name === nominee.name) return null;
-    const teamSize = employees.length; 
-    const potentialVoters = Math.max(1, teamSize - 1); 
+  deleteAward: (id: string) => {
+    const awards = safeParse<StoredAward[]>(STORAGE_KEYS.AWARDS, []).filter(a => a.id !== id);
+    localStorage.setItem(STORAGE_KEYS.AWARDS, JSON.stringify(awards));
+  }
+};
+
+export const nominationStorage = {
+  addNomination: (nomineeId: string, nominatorId: string, awardType: string, comment: string, rating: number) => {
+    const nominations = safeParse<StoredNomination[]>(STORAGE_KEYS.NOMINATIONS, []);
+    const employees = safeParse<Employee[]>(STORAGE_KEYS.EMPLOYEES, []);
+    
+    const nominee = employees.find((e: any) => e.id === nomineeId);
+    if (!nominee) return;
+    
+    // Damped Scoring Logic
+    let potentialVoters = 10; 
+    if (nominee.teamId) {
+        // Find how many people are in this team
+        const users = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
+        const teamMembers = users.filter((u: any) => u.teamId === nominee.teamId);
+        potentialVoters = Math.max(1, teamMembers.length - 1);
+    }
+    
     const fairnessMultiplier = SCALING_FACTOR / Math.sqrt(potentialVoters);
     const weightedPoints = Math.round(BASE_VOTE_VALUE * fairnessMultiplier);
-    const newNom = { id: `nom_${Date.now()}`, nomineeId, nominatorId, awardType, comment, rating, timestamp: new Date().toISOString() };
-    nominations.push(newNom);
+
+    nominations.push({ 
+        id: `nom_${Date.now()}`, 
+        nominatorId, 
+        nomineeId, 
+        awardType: awardType as AwardType, 
+        comment, 
+        rating, 
+        timestamp: new Date().toISOString() 
+    });
     localStorage.setItem(STORAGE_KEYS.NOMINATIONS, JSON.stringify(nominations));
-    nominee.totalScore += weightedPoints;
+    
+    nominee.totalScore = (nominee.totalScore || 0) + weightedPoints;
     localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(employees));
-    return newNom;
   },
+  
+  getNominations: () => safeParse<StoredNomination[]>(STORAGE_KEYS.NOMINATIONS, []),
+  
+  getNominationsForEmployee: (id: string) => {
+      const noms = safeParse<StoredNomination[]>(STORAGE_KEYS.NOMINATIONS, []);
+      const users = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
+      return noms.filter((n:any) => n.nomineeId === id).map((n:any) => {
+           const sender = users.find((u:any) => u.id === n.nominatorId);
+           return { 
+             ...n, 
+             givenBy: sender ? `${sender.firstName} ${sender.lastName}` : "Unknown" 
+           };
+      });
+  },
+  
+  hasUserNominatedForAward: (userId: string, awardType: string) => {
+      const noms = safeParse<StoredNomination[]>(STORAGE_KEYS.NOMINATIONS, []);
+      return noms.some((n: any) => n.nominatorId === userId && n.awardType === awardType);
+  }
 };
+
+export const getARTById = (id: string) => safeParse<ART[]>(STORAGE_KEYS.ARTS, []).find(a => a.id === id);
+export const getTeamById = (id: string) => safeParse<Team[]>(STORAGE_KEYS.TEAMS, []).find(t => t.id === id);
