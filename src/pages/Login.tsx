@@ -133,8 +133,8 @@ const Login = () => {
         {!selectedRole ? (
             /* ROLE SELECTION CARDS */
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in zoom-in-95 duration-500">
-                <Card 
-                    title="Admin" 
+                <Card
+                    title="Admin"
                     icon={<ShieldCheck className="w-10 h-10" />} 
                     desc="System oversight & Manager approval" 
                     color="purple"

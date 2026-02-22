@@ -5,19 +5,17 @@ import { Badge } from "@/components/ui/badge";
 import { 
   Award, LogOut, Trophy, X, Vote, Users, TrendingUp, 
   ArrowLeft, Zap, Calendar, Star, Sparkles, Heart, Activity,
-  Globe, Briefcase, Crown, Medal, Loader2, Info, Shield, Settings, UserCircle
+  Globe, Briefcase, Crown, Medal, Loader2, Info, Shield, Settings, UserCircle, ChevronRight, RefreshCw
 } from "lucide-react";
 import { AwardCategoryCard } from "@/components/AwardCategoryCard";
 import { EmployeeCard } from "@/components/EmployeeCard";
 import { NominationModal } from "@/components/NominationModal";
 import { ProfileSettings } from "@/components/ProfileSettings"; 
-import { awardCategories } from "@/data/mockData";
 import { Employee, AwardType, Badge as BadgeType } from "@/types/employee";
-import { auth, employeeStorage, nominationStorage } from "@/lib/localStorage";
+import { auth, employeeStorage, nominationStorage, artManagerActions, employeeActions, getARTById, getTeamById, sprintStorage, awardStorage, StoredAward } from "@/lib/localStorage";
 import { toast } from "sonner";
-import { getSprintList } from "@/lib/sprintUtils"; 
+import { Card } from "@/components/ui/card"; 
 
-// Constants for Client-Side Calculation
 const SCALING_FACTOR = 3.0;
 const BASE_VOTE_VALUE = 50;
 
@@ -28,10 +26,12 @@ interface EmployeeWithHistory extends Employee {
 const Home = () => {
   const navigate = useNavigate();
   
-  // View State
   const [view, setView] = useState<'dashboard' | 'nomination' | 'history'>('dashboard');
   const [isLoading, setIsLoading] = useState(true);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+
+  // Join Team State
+  const [showTeamSelection, setShowTeamSelection] = useState(false);
 
   // Data State
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -41,12 +41,12 @@ const Home = () => {
   const [allActivity, setAllActivity] = useState<any[]>([]); 
   const [topLeader, setTopLeader] = useState<Employee | null>(null);
   const [topPerformers, setTopPerformers] = useState<Employee[]>([]); 
-  const [userStats, setUserStats] = useState({
-    badgesEarned: 0,
-    nominationsMade: 0,
-    avgRating: 0
-  });
+  const [userStats, setUserStats] = useState({ badgesEarned: 0, nominationsMade: 0, avgRating: 0 });
   const [teamCount, setTeamCount] = useState(0);
+  
+  // DYNAMIC AWARDS STATE
+  const [systemAwards, setSystemAwards] = useState<StoredAward[]>([]);
+  const [currentSprintName, setCurrentSprintName] = useState<string>("Loading Phase...");
 
   // Nomination State
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
@@ -55,16 +55,11 @@ const Home = () => {
   const [filterAward, setFilterAward] = useState<AwardType | null>(null);
 
   useEffect(() => {
-    try {
-      const user = auth.getCurrentUser();
-      if (!user) {
-        navigate("/");
-      } else {
-        setCurrentUser(user);
-      }
-    } catch (e) {
-      console.error("Auth check failed:", e);
+    const user = auth.getCurrentUser();
+    if (!user) {
       navigate("/");
+    } else {
+      setCurrentUser(user);
     }
   }, [navigate]);
 
@@ -74,164 +69,129 @@ const Home = () => {
         fetchData();
       } catch (error) {
         console.error("Error fetching data:", error);
-        toast.error("Dashboard failed to load data correctly.");
       } finally {
         setIsLoading(false);
       }
     }
   }, [currentUser]);
 
+  const handleJoinTeam = (teamId: string) => {
+    if (employeeActions.joinTeam(currentUser.id, teamId)) {
+        toast.success("Joined Team Successfully!");
+        const updatedUser = auth.getCurrentUser();
+        setCurrentUser(updatedUser);
+        setShowTeamSelection(false);
+    } else {
+        toast.error("Failed to join team.");
+    }
+  };
+
   const fetchData = () => {
     if (!currentUser) return; 
 
-    try {
-      // Safely get data with fallbacks
-      const allEmployees = employeeStorage.getEmployees() || [];
-      const sprints = getSprintList() || [];
-      
-      // SAFETY CHECK: Ensure sprints exist before proceeding
-      const currentSprint = (sprints.length > 0) 
-        ? (sprints.find(s => s.status === 'active') || sprints[0]) 
-        : null;
+    setSystemAwards(awardStorage.getAwards());
 
-      // Calculate Dynamic Team Count (Safety check for department property)
-      const uniqueDepts = new Set(
-          allEmployees
-              .filter(e => e && e.department)
-              .map(e => e.department)
-      );
-      setTeamCount(uniqueDepts.size);
-
-      // 1. Process Employees & Calculate SPRINT Scores
-      const validEmployees = allEmployees.filter(e => e && e.id);
-      
-      const employeesWithSprintData = validEmployees.map(emp => {
-        const allBadges = nominationStorage.getNominationsForEmployee(emp.id) || [];
-        
-        let currentSprintBadges: BadgeType[] = [];
-        let historicalBadges: BadgeType[] = [];
-        let sprintScore = 0;
-
-        if (currentSprint && currentSprint.startDate && currentSprint.endDate) {
-            currentSprintBadges = allBadges.filter(b => {
-              if (!b.timestamp) return false;
-              const d = new Date(b.timestamp);
-              return d >= currentSprint.startDate && d <= currentSprint.endDate;
-            });
-
-            historicalBadges = allBadges.filter(b => {
-              if (!b.timestamp) return false;
-              const d = new Date(b.timestamp);
-              return d < currentSprint.startDate;
-            });
-
-            const potentialVoters = Math.max(1, validEmployees.length - 1);
-            const fairnessMultiplier = SCALING_FACTOR / Math.sqrt(potentialVoters);
-            
-            currentSprintBadges.forEach(() => {
-              sprintScore += Math.round(BASE_VOTE_VALUE * fairnessMultiplier);
-            });
-        } else {
-            historicalBadges = allBadges; 
-        }
-
-        return {
-          ...emp,
-          badges: currentSprintBadges, 
-          pastBadges: historicalBadges,
-          totalScore: sprintScore 
-        };
-      }).filter(e => e && e.id);
-      
-      setEmployees(employeesWithSprintData);
-
-      // 2. Rank for Top Performers
-      const activePerformers = employeesWithSprintData.filter(e => e.totalScore > 0);
-      const sortedByRank = [...activePerformers].sort((a, b) => {
-        if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
-        return (a.name || "").localeCompare(b.name || "");
-      });
-      
-      if (sortedByRank.length > 0) {
-        setTopLeader(sortedByRank[0]);
-        setTopPerformers(sortedByRank.slice(0, 3)); 
-      } else {
-        setTopLeader(null);
-        setTopPerformers([]);
-      }
-
-      // 3. Calculate User Stats
-      const normalizedCurrentName = currentUser.name ? currentUser.name.trim().toLowerCase() : "";
-      
-      const myEmployeeRecord = validEmployees.find(e => e.name && e.name.trim().toLowerCase() === normalizedCurrentName);
-      setCurrentEmployeeRecord(myEmployeeRecord);
-
-      let myLifetimeBadges: BadgeType[] = [];
-      if (myEmployeeRecord && myEmployeeRecord.id) {
-        myLifetimeBadges = nominationStorage.getNominationsForEmployee(myEmployeeRecord.id);
-      } else if (currentUser.id) {
-        myLifetimeBadges = nominationStorage.getNominationsForEmployee(currentUser.id);
-      }
-
-      let mySprintBadges: BadgeType[] = [];
-      if (currentSprint && currentSprint.startDate && currentSprint.endDate) {
-          mySprintBadges = myLifetimeBadges.filter(b => {
-              if (!b.timestamp) return false;
-              const d = new Date(b.timestamp);
-              return d >= currentSprint.startDate && d <= currentSprint.endDate;
-          });
-      }
-
-      const allNominationsInSystem = nominationStorage.getNominations() || [];
-      let nominationsMadeCount = 0;
-      if (currentSprint && currentSprint.startDate && currentSprint.endDate) {
-          nominationsMadeCount = allNominationsInSystem.filter(n => {
-              if (!n.timestamp) return false;
-              const d = new Date(n.timestamp);
-              return n.nominatorId === currentUser.id && d >= currentSprint.startDate && d <= currentSprint.endDate;
-          }).length;
-      }
-
-      const mySprintRecord = employeesWithSprintData.find(e => e.name && e.name.trim().toLowerCase() === normalizedCurrentName);
-
-      setUserStats({
-        badgesEarned: mySprintBadges.length,
-        nominationsMade: nominationsMadeCount,
-        avgRating: mySprintRecord ? mySprintRecord.totalScore : 0
-      });
-
-      // 4. Generate Recent Activity Feed
-      const allBadgesForFeed = validEmployees.flatMap(emp => {
-        const empBadges = nominationStorage.getNominationsForEmployee(emp.id) || [];
-        
-        let badgesToUse = empBadges;
-        if (currentSprint && currentSprint.startDate && currentSprint.endDate) {
-           badgesToUse = empBadges.filter(badge => {
-             if (!badge.timestamp) return false;
-             const d = new Date(badge.timestamp);
-             return d >= currentSprint.startDate && d <= currentSprint.endDate;
-          });
-        }
-
-        return badgesToUse.map(badge => ({
-            ...badge,
-            receiverName: emp.name || "Unknown",
-            receiverImg: emp.profilePicture,
-        }));
-      });
-
-      const sortedActivity = allBadgesForFeed.sort((a, b) => {
-        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
-        return timeB - timeA;
-      });
-
-      setAllActivity(sortedActivity);
-      setRecentActivity(sortedActivity.slice(0, 10));
-
-    } catch (err) {
-      console.error("Critical error in fetchData:", err);
+    const allEmployees = employeeStorage.getEmployees();
+    
+    const sprints = sprintStorage.getSprints();
+    const currentSprint = sprints.find(s => s.status === 'active') || sprints[sprints.length - 1];
+    if (currentSprint) {
+        setCurrentSprintName(currentSprint.title);
     }
+
+    const allTeams = artManagerActions.getTeams();
+    const myArtTeams = currentUser.artId ? allTeams.filter(t => t.artId === currentUser.artId) : [];
+    setTeamCount(myArtTeams.length);
+
+    let teamEmployees = allEmployees;
+    if (currentUser.role === 'employee' && currentUser.teamId) {
+        teamEmployees = allEmployees.filter(e => e.teamId === currentUser.teamId);
+    }
+
+    const employeesWithSprintData = teamEmployees.map(emp => {
+      const allBadges = nominationStorage.getNominationsForEmployee(emp.id);
+      
+      const currentSprintBadges = allBadges.filter(b => {
+        const d = new Date(b.timestamp).getTime();
+        const start = new Date(currentSprint.startDate).getTime();
+        if (currentSprint.status === 'active') return d >= start;
+        const end = new Date(currentSprint.endDate).getTime();
+        return d >= start && d <= end;
+      });
+
+      const historicalBadges = allBadges.filter(b => new Date(b.timestamp).getTime() < new Date(currentSprint.startDate).getTime());
+
+      const potentialVoters = Math.max(1, teamEmployees.length);
+      const fairnessMultiplier = SCALING_FACTOR / Math.sqrt(potentialVoters);
+      
+      let sprintScore = 0;
+      currentSprintBadges.forEach(() => { sprintScore += Math.round(BASE_VOTE_VALUE * fairnessMultiplier); });
+
+      return { ...emp, badges: currentSprintBadges, pastBadges: historicalBadges, totalScore: sprintScore };
+    });
+    
+    setEmployees(employeesWithSprintData);
+
+    const activePerformers = employeesWithSprintData.filter(e => e.totalScore > 0);
+    const sortedByRank = [...activePerformers].sort((a, b) => {
+      if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
+      return a.name.localeCompare(b.name);
+    });
+    
+    if (sortedByRank.length > 0) {
+      setTopLeader(sortedByRank[0]);
+      setTopPerformers(sortedByRank.slice(0, 3)); 
+    } else {
+      setTopLeader(null);
+      setTopPerformers([]);
+    }
+
+    const normalizedCurrentName = currentUser.name.trim().toLowerCase();
+    const myEmployeeRecord = allEmployees.find(e => e.name.trim().toLowerCase() === normalizedCurrentName);
+    setCurrentEmployeeRecord(myEmployeeRecord);
+
+    let myLifetimeBadges: BadgeType[] = [];
+    if (myEmployeeRecord) {
+      myLifetimeBadges = nominationStorage.getNominationsForEmployee(myEmployeeRecord.id);
+    } else {
+      myLifetimeBadges = nominationStorage.getNominationsForEmployee(currentUser.id);
+    }
+
+    const mySprintBadges = myLifetimeBadges.filter(b => {
+        const d = new Date(b.timestamp).getTime();
+        const start = new Date(currentSprint.startDate).getTime();
+        if (currentSprint.status === 'active') return d >= start;
+        return d >= start && d <= new Date(currentSprint.endDate).getTime();
+    });
+
+    const allNominationsInSystem = nominationStorage.getNominations();
+    const nominationsMadeCount = allNominationsInSystem.filter(n => {
+        const d = new Date(n.timestamp).getTime();
+        const start = new Date(currentSprint.startDate).getTime();
+        const isCurrent = currentSprint.status === 'active' ? (d >= start) : (d >= start && d <= new Date(currentSprint.endDate).getTime());
+        return n.nominatorId === currentUser.id && isCurrent;
+    }).length;
+
+    const mySprintRecord = employeesWithSprintData.find(e => e.name.trim().toLowerCase() === normalizedCurrentName);
+
+    setUserStats({ badgesEarned: mySprintBadges.length, nominationsMade: nominationsMadeCount, avgRating: mySprintRecord ? mySprintRecord.totalScore : 0 });
+
+    // BULLETPROOF FEED LOGIC: Maps directly from calculated badges guaranteeing display if points exist.
+    let feed: any[] = [];
+    employeesWithSprintData.forEach(emp => {
+        emp.badges.forEach(badge => {
+            let giver = badge.givenBy;
+            if (!giver) {
+                const u = allEmployees.find(e => e.id === badge.nominatorId);
+                giver = u ? u.name : "A Peer";
+            }
+            feed.push({ ...badge, givenBy: giver, receiverName: emp.name, receiverImg: emp.profilePicture });
+        });
+    });
+
+    feed.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    setAllActivity(feed);
+    setRecentActivity(feed.slice(0, 10));
   };
 
   const handleLogout = () => {
@@ -241,55 +201,102 @@ const Home = () => {
   };
 
   const handleNominate = (employee: Employee, awardType: AwardType) => {
-    if (currentUser && employee && currentUser.name === employee.name) return;
-    
     setSelectedEmployee(employee);
     setSelectedAward(awardType);
     setIsNominationOpen(true);
   };
 
-  const filteredEmployees = employees.filter((emp) => emp && emp.name !== currentUser?.name);
+  // EXCLUDES CURRENT USER SO YOU CANNOT NOMINATE YOURSELF
+  const filteredEmployees = employees.filter((emp) => emp.id !== currentUser?.id);
 
   const renderRankIcon = (index: number, score: number, allTop: Employee[]) => {
     let rank = 1;
-    if (index > 0 && allTop[index-1] && score < allTop[index - 1].totalScore) rank = index + 1;
-    else if (index > 0 && allTop[index-1] && score === allTop[index - 1].totalScore) {
+    if (index > 0 && score < allTop[index - 1].totalScore) rank = index + 1;
+    else if (index > 0 && score === allTop[index - 1].totalScore) {
       if (index === 1) rank = 1;
-      if (index === 2) {
-         const prevScore = allTop[1] ? allTop[1].totalScore : 0;
-         const topScore = allTop[0] ? allTop[0].totalScore : 0;
-         rank = prevScore === topScore ? 1 : 2;
-      }
+      if (index === 2) rank = allTop[1].totalScore === allTop[0].totalScore ? 1 : 2;
     }
-    if (rank === 1) return <span className="text-2xl" role="img" aria-label="Gold Medal">🥇</span>;
-    if (rank === 2) return <span className="text-2xl" role="img" aria-label="Silver Medal">🥈</span>;
-    if (rank === 3) return <span className="text-2xl" role="img" aria-label="Bronze Medal">🥉</span>;
+    if (rank === 1) return <span className="text-2xl" role="img">🥇</span>;
+    if (rank === 2) return <span className="text-2xl" role="img">🥈</span>;
+    if (rank === 3) return <span className="text-2xl" role="img">🥉</span>;
     return <span className="text-slate-500 font-bold">#{rank}</span>;
   };
 
   if (!currentUser || isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="text-center space-y-4">
-          <Loader2 className="w-10 h-10 text-indigo-600 animate-spin mx-auto" />
-          <p className="text-muted-foreground">Loading your workspace...</p>
-        </div>
-      </div>
-    );
+    return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="w-10 h-10 text-indigo-600 animate-spin" /></div>;
   }
 
-  const firstName = (currentUser.name && typeof currentUser.name === 'string') ? currentUser.name.split(' ')[0] : 'Team Member';
+  // --- VIEW 1: DYNAMIC JOIN TEAM FLOW ---
+  if (currentUser.role === 'employee' && currentUser.artId && !currentUser.teamId) {
+      const art = getARTById(currentUser.artId);
+      const allSystemTeams = artManagerActions.getTeams(); 
+      // Compute teams on the fly to avoid missing newly created teams
+      const availableDynamicTeams = allSystemTeams.filter(t => t.artId === currentUser.artId);
+
+      return (
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+            <div className="max-w-3xl w-full">
+                <div className="text-center mb-10">
+                    <h1 className="text-3xl font-bold text-slate-900 mb-2">Welcome aboard, {currentUser.firstName}! 🚂</h1>
+                    <p className="text-slate-500">You have been assigned to the <strong>{art?.name}</strong> ART. <br/>Please join your specific team to start nominating peers.</p>
+                </div>
+
+                {!showTeamSelection ? (
+                     <div 
+                        onClick={() => setShowTeamSelection(true)}
+                        className="bg-white p-8 rounded-3xl border-2 border-indigo-100 hover:border-indigo-500 cursor-pointer shadow-sm hover:shadow-xl transition-all group flex items-center justify-between"
+                     >
+                        <div className="flex items-center gap-6">
+                            <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                                <Briefcase className="w-10 h-10" />
+                            </div>
+                            <div>
+                                <h2 className="text-2xl font-bold text-slate-900">{art?.name}</h2>
+                                <p className="text-slate-500">{art?.department}</p>
+                            </div>
+                        </div>
+                        <ChevronRight className="w-6 h-6 text-slate-300 group-hover:text-indigo-600" />
+                     </div>
+                ) : (
+                    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                        <div className="flex justify-between items-center">
+                            <Button variant="ghost" onClick={() => setShowTeamSelection(false)} className="pl-0"><ArrowLeft className="w-4 h-4 mr-2"/> Back</Button>
+                            <Button variant="outline" size="sm" onClick={() => fetchData()} className="text-indigo-600"><RefreshCw className="w-4 h-4 mr-2"/> Refresh Teams</Button>
+                        </div>
+                        
+                        <h3 className="text-lg font-semibold text-slate-800">Available Teams in {art?.name}</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {availableDynamicTeams.length === 0 ? (
+                                <div className="col-span-2 text-center py-10 bg-white rounded-2xl border">
+                                  <p className="text-slate-400">No teams created in this ART yet.</p>
+                                  <Button variant="ghost" onClick={() => setShowTeamSelection(false)} className="mt-2">Go Back</Button>
+                                </div>
+                            ) : (
+                                availableDynamicTeams.map(t => (
+                                    <div key={t.id} className="bg-white p-6 rounded-2xl border hover:shadow-lg transition-all space-y-4">
+                                        <div>
+                                            <h4 className="font-bold text-lg text-slate-900">{t.name}</h4>
+                                            <p className="text-xs text-slate-500 line-clamp-2">{t.description}</p>
+                                        </div>
+                                        <Button className="w-full bg-indigo-600 hover:bg-indigo-700" onClick={() => handleJoinTeam(t.id)}>Join Team</Button>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+      );
+  }
+
+  const firstName = currentUser.name ? currentUser.name.split(' ')[0] : 'Team Member';
   const profilePic = currentEmployeeRecord?.profilePicture;
-  
   const isEmployee = currentUser.role === 'employee';
+  const myTeam = getTeamById(currentUser.teamId);
 
   return (
     <div className="min-h-screen bg-slate-50/50 relative overflow-hidden">
-      <div className="absolute top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-purple-200/30 rounded-full blur-3xl" />
-        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-blue-200/30 rounded-full blur-3xl" />
-      </div>
-
       <header className="border-b bg-white/80 backdrop-blur-md sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -319,16 +326,24 @@ const Home = () => {
             <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-xl shadow-indigo-500/20">
                <div className="relative z-10 p-8 md:p-10 flex flex-col md:flex-row items-center md:items-start gap-6">
                  <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-2xl border-2 border-white/30 overflow-hidden">{profilePic ? <img src={profilePic} className="w-full h-full object-cover" /> : firstName.charAt(0)}</div>
-                 <div className="text-center md:text-left"><h2 className="text-3xl font-bold mb-2">Welcome back, {firstName}! 👋</h2><p className="text-indigo-100 text-lg max-w-xl">"Celebrate achievements. Empower people."</p></div>
+                 <div className="text-center md:text-left">
+                     <h2 className="text-3xl font-bold mb-2">Welcome back, {firstName}! 👋</h2>
+                     <p className="text-indigo-100 text-lg max-w-xl">
+                        {myTeam ? `Team: ${myTeam.name}` : "Celebrate achievements. Empower people."}
+                     </p>
+                     <div className="mt-4 inline-flex items-center gap-2 bg-white/20 px-4 py-2 rounded-full backdrop-blur-md border border-white/30 text-sm font-semibold text-white shadow-sm">
+                        <Calendar className="w-4 h-4 text-indigo-100" />
+                        Current Phase: {currentSprintName}
+                     </div>
+                 </div>
               </div>
             </section>
             
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                <div className="lg:col-span-2 space-y-8">
-                 
                  {isEmployee && (
                    <>
-                     {/* Quick Actions */}
+                     {/* QUICK ACTIONS */}
                      <div className="space-y-4">
                       <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2"><Zap className="w-4 h-4 text-amber-500" /> Quick Actions</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -341,44 +356,44 @@ const Home = () => {
                       </div>
                      </div>
 
-                     {/* Stats */}
+                     {/* STATS */}
                      <div className="grid grid-cols-3 gap-4">
                         <div className="bg-white p-4 rounded-2xl border text-center"><span className="text-2xl font-bold text-gray-900">{userStats.badgesEarned}</span><br/><span className="text-xs text-muted-foreground font-medium">Badges</span></div>
                         <div className="bg-white p-4 rounded-2xl border text-center"><span className="text-2xl font-bold text-gray-900">{userStats.nominationsMade}</span><br/><span className="text-xs text-muted-foreground font-medium">Votes</span></div>
                         <div className="bg-white p-4 rounded-2xl border text-center"><span className="text-2xl font-bold text-gray-900">{userStats.avgRating}</span><br/><span className="text-xs text-muted-foreground font-medium">Sprint Pts</span></div>
                      </div>
-                     
-                     {/* Pulse */}
-                     <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                      <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2">
-                        <Activity className="w-4 h-4" /> Organization Pulse
-                      </h3>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 divide-x divide-slate-100">
-                        <div className="flex flex-col items-center justify-center text-center px-2">
-                          <div className="text-2xl font-bold text-gray-900">{employees.length}</div>
-                          <div className="text-xs text-muted-foreground font-medium flex items-center gap-1 mt-1"><Users className="w-3 h-3"/> Total Employees</div>
+
+                     {/* ORGANIZATIONAL PULSE */}
+                     <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm hover:shadow-lg transition-all duration-300">
+                        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+                          <Activity className="w-4 h-4 text-indigo-500" /> Organizational Pulse
+                        </h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 divide-x divide-slate-100">
+                          <div className="flex flex-col items-center justify-center text-center px-2 group">
+                            <div className="text-2xl font-bold text-gray-900 group-hover:text-indigo-600 transition-colors">{employeeStorage.getEmployees().length}</div>
+                            <div className="text-xs text-muted-foreground font-medium flex items-center gap-1 mt-1"><Users className="w-3 h-3"/> Active Users</div>
+                          </div>
+                          <div className="flex flex-col items-center justify-center text-center px-2 group">
+                            <div className="text-2xl font-bold text-gray-900 group-hover:text-indigo-600 transition-colors">{teamCount}</div>
+                            <div className="text-xs text-muted-foreground font-medium flex items-center gap-1 mt-1"><Briefcase className="w-3 h-3"/> ART Teams</div>
+                          </div>
+                          <div className="flex flex-col items-center justify-center text-center px-2 group">
+                            <div className="text-2xl font-bold text-gray-900 group-hover:text-indigo-600 transition-colors">3</div>
+                            <div className="text-xs text-muted-foreground font-medium flex items-center gap-1 mt-1"><Globe className="w-3 h-3"/> Countries</div>
+                          </div>
+                          <div className="flex flex-col items-center justify-center text-center px-2 group">
+                            <div className="text-2xl font-bold text-emerald-600 group-hover:text-emerald-500 transition-colors">High</div>
+                            <div className="text-xs text-muted-foreground font-medium flex items-center gap-1 mt-1"><Zap className="w-3 h-3"/> Engagement</div>
+                          </div>
                         </div>
-                        <div className="flex flex-col items-center justify-center text-center px-2">
-                          <div className="text-2xl font-bold text-gray-900">3</div>
-                          <div className="text-xs text-muted-foreground font-medium flex items-center gap-1 mt-1"><Globe className="w-3 h-3"/> Countries</div>
-                        </div>
-                        <div className="flex flex-col items-center justify-center text-center px-2">
-                          <div className="text-2xl font-bold text-emerald-600">{Math.max(0, employees.length - 2)}</div>
-                          <div className="text-xs text-muted-foreground font-medium flex items-center gap-1 mt-1"><Zap className="w-3 h-3"/> Active Today</div>
-                        </div>
-                        <div className="flex flex-col items-center justify-center text-center px-2">
-                          <div className="text-2xl font-bold text-gray-900">{teamCount}</div>
-                          <div className="text-xs text-muted-foreground font-medium flex items-center gap-1 mt-1"><Briefcase className="w-3 h-3"/> Teams</div>
-                        </div>
-                      </div>
                      </div>
                    </>
                  )}
 
-                 {/* Top Performers (Visible to ALL roles) */}
+                 {/* TOP PERFORMERS */}
                  <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm relative overflow-hidden">
                    <div className="flex items-center justify-between mb-4">
-                     <h3 className="font-bold text-gray-900 flex items-center gap-2"><Crown className="w-5 h-5 text-yellow-500" /> Top 3 Performers This Sprint</h3>
+                     <h3 className="font-bold text-gray-900 flex items-center gap-2"><Crown className="w-5 h-5 text-yellow-500" /> Top Performers ({currentSprintName})</h3>
                      <Button variant="link" className="text-xs text-indigo-600 p-0 h-auto" onClick={() => navigate('/leaderboard')}>View full leaderboard →</Button>
                    </div>
                    <div className="space-y-3">
@@ -401,10 +416,10 @@ const Home = () => {
                  </div>
                </div>
 
-               {/* Right Column: Recent Feed (Visible to ALL roles) */}
+               {/* RIGHT COLUMN: ACTIVITY */}
                <div className="lg:col-span-1">
                  <div className="bg-white rounded-2xl border shadow-sm h-full p-4 overflow-y-auto max-h-[500px]">
-                    <h3 className="font-semibold mb-4">Recent Activity</h3>
+                    <h3 className="font-semibold mb-4">Activity in {currentSprintName}</h3>
                     {recentActivity.length === 0 ? <div className="text-center py-8 text-muted-foreground text-sm">No activity yet.</div> : 
                     recentActivity.map(item => (
                         <div key={item.id} className="flex gap-3 text-sm mb-4">
@@ -423,24 +438,24 @@ const Home = () => {
              <Button variant="ghost" className="mb-6 pl-0" onClick={() => setView('dashboard')}><ArrowLeft className="mr-2 h-4 w-4" /> Back</Button>
              <section className="mb-12">
                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {awardCategories.map(cat => <AwardCategoryCard key={cat.type} category={cat} onClick={() => setFilterAward(filterAward === cat.type ? null : cat.type)} isSelected={filterAward === cat.type} />)}
+                {systemAwards.map(cat => (
+                    <AwardCategoryCard 
+                        key={cat.id} 
+                        category={{...cat, name: cat.type} as any}
+                        onClick={() => setFilterAward(filterAward === cat.type ? null : (cat.type as AwardType))} 
+                        isSelected={filterAward === cat.type} 
+                    />
+                ))}
                </div>
             </section>
             <section>
+              <h3 className="text-xl font-bold mb-4 text-slate-800">Select Teammate</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {/* FILTERED TO PREVENT SELF NOMINATION */}
                 {filteredEmployees.map(emp => <EmployeeCard key={emp.id} employee={emp} onNominate={filterAward ? (e) => handleNominate(e, filterAward) : handleNominate} preselectedAward={filterAward} isDisabled={false} />)}
               </div>
             </section>
           </div>
-        )}
-
-        {view === 'history' && (
-           <div className="animate-in fade-in slide-in-from-right-8 duration-500">
-             <Button variant="ghost" className="mb-6 pl-0" onClick={() => setView('dashboard')}><ArrowLeft className="mr-2 h-4 w-4" /> Back</Button>
-             <div className="bg-white rounded-2xl border p-4">
-               {allActivity.map(item => <div key={item.id} className="p-4 border-b">{item.givenBy} recognized {item.receiverName}</div>)}
-             </div>
-           </div>
         )}
       </main>
 
