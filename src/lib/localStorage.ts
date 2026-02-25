@@ -1,17 +1,17 @@
 import { Employee, Badge, AwardType } from "@/types/employee";
 
-// VERSION UPDATE: _v68 (Strict Tab-Level User Locking for flawless multi-manager sessions)
+// VERSION UPDATE: _v69 (Custom Start/End Dates for Sprints & Dynamic Leaderboard fixes)
 export const STORAGE_KEYS = {
-  USERS: "sprintwise_users_v68",
-  SESSIONS: "sprintwise_sessions_v68", 
-  ACTIVE_TAB_ROLE: "sprintwise_active_tab_role_v68", 
-  EMPLOYEES: "sprintwise_employees_v68",
-  NOMINATIONS: "sprintwise_nominations_v68",
-  SPRINTS: "sprintwise_sprints_v68",
-  ARTS: "sprintwise_arts_v68",
-  TEAMS: "sprintwise_teams_v68",
-  NOTIFICATIONS: "sprintwise_notifications_v68",
-  AWARDS: "sprintwise_awards_v68",
+  USERS: "sprintwise_users_v69",
+  SESSIONS: "sprintwise_sessions_v69", 
+  ACTIVE_TAB_ROLE: "sprintwise_active_tab_role_v69", 
+  EMPLOYEES: "sprintwise_employees_v69",
+  NOMINATIONS: "sprintwise_nominations_v69",
+  SPRINTS: "sprintwise_sprints_v69",
+  ARTS: "sprintwise_arts_v69",
+  TEAMS: "sprintwise_teams_v69",
+  NOTIFICATIONS: "sprintwise_notifications_v69",
+  AWARDS: "sprintwise_awards_v69",
 };
 
 const BASE_VOTE_VALUE = 50; 
@@ -150,9 +150,7 @@ export const auth = {
   getCurrentUser: (targetRole?: UserRole) => {
     const allUsers = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
 
-    // FIXED: Strict Tab-Level User Locking
-    // This perfectly prevents Manager 2 in Tab B from overwriting Manager 1 in Tab A
-    const tabUserId = sessionStorage.getItem("sprintwise_tab_user_id_v68");
+    const tabUserId = sessionStorage.getItem("sprintwise_tab_user_id_v69");
     if (tabUserId) {
         const user = allUsers.find(u => u.id === tabUserId);
         if (user && (!targetRole || user.role === targetRole)) {
@@ -160,7 +158,6 @@ export const auth = {
         }
     }
 
-    // Fallback: If a new tab is opened without a strict lock, fetch from global
     const sessions = safeParse<Record<string, StoredUser>>(STORAGE_KEYS.SESSIONS, {});
     let baseUser = null;
     
@@ -214,22 +211,18 @@ export const auth = {
     if (user.role !== selectedRole) return { success: false, error: "Incorrect portal role selected" };
     if (user.status !== 'approved') return { success: false, error: `Account ${user.status}` };
     
-    // 1. Save to Global Sessions (so you stay logged in across new tabs)
     const sessions = safeParse<Record<string, StoredUser>>(STORAGE_KEYS.SESSIONS, {});
     sessions[selectedRole] = user;
     localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(sessions));
     
-    // 2. STRICT FIX: Lock this specific tab to this exact User ID
-    sessionStorage.setItem("sprintwise_tab_user_id_v68", user.id);
+    sessionStorage.setItem("sprintwise_tab_user_id_v69", user.id);
     sessionStorage.setItem(STORAGE_KEYS.ACTIVE_TAB_ROLE, selectedRole);
     
     return { success: true, user };
   },
   
   logout: (role?: UserRole) => {
-    // Clear strict tab lock
-    sessionStorage.removeItem("sprintwise_tab_user_id_v68");
-
+    sessionStorage.removeItem("sprintwise_tab_user_id_v69");
     const activeRole = role || sessionStorage.getItem(STORAGE_KEYS.ACTIVE_TAB_ROLE) as UserRole;
     if (activeRole) {
         const sessions = safeParse<Record<string, StoredUser>>(STORAGE_KEYS.SESSIONS, {});
@@ -423,11 +416,12 @@ export const sprintStorage = {
       let mySprints = s.filter(x => x.managerId === managerId);
       
       if (mySprints.length === 0) {
+          const year = new Date().getFullYear();
           const newSprint: StoredSprint = { 
               id: `sp_${Date.now()}_${managerId}`, 
               title: "Sprint 1 (Initial Phase)", 
-              startDate: new Date().toISOString(), 
-              endDate: '9999-12-31T23:59:59.999Z', 
+              startDate: new Date(year, 0, 1).toISOString(), 
+              endDate: new Date(year, 2, 31, 23, 59, 59).toISOString(), 
               status: 'active', 
               managerId 
           };
@@ -438,16 +432,28 @@ export const sprintStorage = {
       
       return mySprints;
   },
-  addSprint: (title: string, managerId: string) => {
+  // FIXED: Now takes strictly defined manual Start and End dates for quarterly cycles
+  addSprint: (title: string, startDate: string, endDate: string, managerId: string) => {
     const s = safeParse<StoredSprint[]>(STORAGE_KEYS.SPRINTS, []);
-    const now = new Date().toISOString();
+    
+    // Auto-complete older active sprints for this exact manager
     s.forEach(sprint => {
         if (sprint.status === 'active' && sprint.managerId === managerId) {
             sprint.status = 'completed';
-            sprint.endDate = now;
         }
     });
-    s.push({ id: `sp_${Date.now()}`, title, startDate: now, endDate: '9999-12-31T23:59:59.999Z', status: 'active', managerId });
+
+    const endDateTime = new Date(endDate);
+    endDateTime.setHours(23, 59, 59, 999); // Force end of day for the selected end date
+
+    s.push({ 
+        id: `sp_${Date.now()}`, 
+        title, 
+        startDate: new Date(startDate).toISOString(), 
+        endDate: endDateTime.toISOString(), 
+        status: 'active', 
+        managerId 
+    });
     localStorage.setItem(STORAGE_KEYS.SPRINTS, JSON.stringify(s));
   }
 };

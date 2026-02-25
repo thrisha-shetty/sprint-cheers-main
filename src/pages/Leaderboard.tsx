@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Trophy, Lock, CalendarRange, Clock, Users } from "lucide-react";
 import { Employee, Badge as BadgeType } from "@/types/employee";
-import { employeeStorage, nominationStorage, artManagerActions, auth } from "@/lib/localStorage";
+import { employeeStorage, nominationStorage, artManagerActions, auth, getARTById, sprintStorage } from "@/lib/localStorage";
 import { LeaderboardCard } from "@/components/LeaderboardCard"; 
 import { BadgeDetailModal } from "@/components/BadgeDetailModal";
 
@@ -12,7 +12,7 @@ const SCALING_FACTOR = 3.0;
 const BASE_VOTE_VALUE = 50;
 
 interface SprintCard {
-  id: number;
+  id: string; // FIXED: Using strict Database string IDs
   title: string;
   period: string;
   startDate: Date;
@@ -29,7 +29,7 @@ interface TeamLeaderboard {
 const Leaderboard = () => {
   const navigate = useNavigate();
   const [sprints, setSprints] = useState<SprintCard[]>([]);
-  const [selectedSprintId, setSelectedSprintId] = useState<number>(1);
+  const [selectedSprintId, setSelectedSprintId] = useState<string>("");
   const [teamLeaderboards, setTeamLeaderboards] = useState<TeamLeaderboard[]>([]);
   
   const [selectedBadge, setSelectedBadge] = useState<BadgeType | null>(null);
@@ -37,54 +37,52 @@ const Leaderboard = () => {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
 
   useEffect(() => {
-    const today = new Date();
-    const currentYear = today.getFullYear();
+    // FIXED: Dynamically fetch sprints tailored specifically to this logged-in manager or employee's manager
+    const user = auth.getCurrentUser();
+    let targetManagerId = undefined;
     
-    const tempSprints: SprintCard[] = [
-      { 
-        id: 1, 
-        title: "Sprint 1", 
-        period: "Jan - Mar", 
-        startDate: new Date(currentYear, 0, 1), 
-        endDate: new Date(currentYear, 3, 0, 23, 59, 59) 
-      },
-      { 
-        id: 2, 
-        title: "Sprint 2", 
-        period: "Apr - Jun", 
-        startDate: new Date(currentYear, 3, 1), 
-        endDate: new Date(currentYear, 6, 0, 23, 59, 59) 
-      },
-      { 
-        id: 3, 
-        title: "Sprint 3", 
-        period: "Jul - Sep", 
-        startDate: new Date(currentYear, 6, 1), 
-        endDate: new Date(currentYear, 9, 0, 23, 59, 59) 
-      },
-      { 
-        id: 4, 
-        title: "Sprint 4", 
-        period: "Oct - Dec", 
-        startDate: new Date(currentYear, 9, 1), 
-        endDate: new Date(currentYear, 12, 0, 23, 59, 59) 
-      },
-    ].map(s => {
-      if (today < s.startDate) return { ...s, status: 'locked' };
-      if (today >= s.startDate && today <= s.endDate) return { ...s, status: 'active' };
-      return { ...s, status: 'completed' };
-    }) as SprintCard[];
+    if (user) {
+        if (user.role === 'employee' && user.artId) {
+            const art = getARTById(user.artId);
+            targetManagerId = art ? art.managerId : undefined;
+        } else if (user.role === 'art-manager') {
+            targetManagerId = user.id;
+        }
+    }
+    
+    const storedSprints = sprintStorage.getSprints(targetManagerId);
+    const today = new Date();
+    
+    const mappedSprints: SprintCard[] = storedSprints.map(s => {
+        const sd = new Date(s.startDate);
+        const ed = new Date(s.endDate);
+        let status: 'locked' | 'active' | 'completed' = 'completed';
+        
+        if (today < sd) status = 'locked';
+        else if (today >= sd && today <= ed) status = 'active';
 
-    setSprints(tempSprints);
+        return {
+            id: s.id,
+            title: s.title || "Custom Sprint",
+            period: `${sd.toLocaleDateString(undefined, {month:'short'})} - ${ed.toLocaleDateString(undefined, {month:'short'})}`,
+            startDate: sd,
+            endDate: ed,
+            status: status
+        };
+    });
 
-    const active = tempSprints.find(s => s.status === 'active');
-    if (active) setSelectedSprintId(active.id);
-    else setSelectedSprintId(1); 
+    mappedSprints.sort((a,b) => a.startDate.getTime() - b.startDate.getTime());
+    setSprints(mappedSprints);
 
+    if (mappedSprints.length > 0) {
+        const active = mappedSprints.find(s => s.status === 'active');
+        if (active) setSelectedSprintId(active.id);
+        else setSelectedSprintId(mappedSprints[mappedSprints.length - 1].id); 
+    }
   }, []);
 
   useEffect(() => {
-    if (sprints.length === 0) return;
+    if (sprints.length === 0 || !selectedSprintId) return;
 
     const currentSprint = sprints.find(s => s.id === selectedSprintId);
     if (!currentSprint) return;
@@ -112,7 +110,7 @@ const Leaderboard = () => {
                 return badgeDate >= currentSprint.startDate && badgeDate <= currentSprint.endDate;
             });
 
-            // FIXED MATH: Subtract 1 because employee cannot vote for self
+            // Calculate Fairness Math Based solely on team size
             const empTeamSize = teamEmps.length;
             const potentialVoters = Math.max(1, empTeamSize - 1);
             const fairnessMultiplier = SCALING_FACTOR / Math.sqrt(potentialVoters);
@@ -161,57 +159,62 @@ const Leaderboard = () => {
                 <Trophy className="w-6 h-6 text-amber-500 fill-amber-500" />
                 Champions Board
               </h1>
-              <p className="text-xs text-muted-foreground font-medium">Celebrating Excellence in {new Date().getFullYear()}</p>
+              <p className="text-xs text-muted-foreground font-medium">Celebrating Excellence</p>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {sprints.map((sprint) => {
-              const isLocked = sprint.status === 'locked';
-              const isActive = sprint.status === 'active';
-              const isSelected = selectedSprintId === sprint.id;
+          {/* DYNAMIC SPRINT SELECTOR */}
+          {sprints.length > 0 ? (
+              <div className="flex gap-3 overflow-x-auto pb-2 custom-scrollbar pr-2">
+                {sprints.map((sprint) => {
+                  const isLocked = sprint.status === 'locked';
+                  const isActive = sprint.status === 'active';
+                  const isSelected = selectedSprintId === sprint.id;
 
-              return (
-                <button
-                  key={sprint.id}
-                  disabled={isLocked}
-                  onClick={() => setSelectedSprintId(sprint.id)}
-                  className={`
-                    relative flex flex-col items-start p-3 rounded-xl border transition-all duration-200 text-left
-                    ${isLocked 
-                      ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed' 
-                      : isSelected 
-                        ? 'bg-indigo-50 border-indigo-500 ring-1 ring-indigo-500 shadow-sm' 
-                        : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-md'
-                    }
-                  `}
-                >
-                  <div className="flex justify-between w-full mb-1">
-                    <span className={`text-xs font-bold uppercase tracking-wider ${isSelected ? 'text-indigo-700' : 'text-slate-500'}`}>
-                      {sprint.title}
-                    </span>
-                    {isLocked && <Lock className="w-3 h-3 text-slate-400" />}
-                    {isActive && !isLocked && (
-                      <span className="flex h-2 w-2 relative">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                      </span>
-                    )}
-                  </div>
-                  <div className={`text-sm font-semibold ${isSelected ? 'text-indigo-900' : 'text-slate-700'}`}>
-                    {sprint.period}
-                  </div>
-                  <div className="mt-2 text-[10px] text-slate-400 flex items-center gap-1">
-                    {isLocked ? (
-                      <span>Opens {sprint.startDate.toLocaleDateString(undefined, {month: 'short', day: 'numeric'})}</span>
-                    ) : (
-                      isActive ? <span className="text-green-600 font-medium flex items-center gap-1"><Clock className="w-3 h-3"/> In Progress</span> : <span className="flex items-center gap-1"><CalendarRange className="w-3 h-3"/> Completed</span>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+                  return (
+                    <button
+                      key={sprint.id}
+                      disabled={isLocked}
+                      onClick={() => setSelectedSprintId(sprint.id)}
+                      className={`
+                        min-w-[160px] relative flex flex-col items-start p-3 rounded-xl border transition-all duration-200 text-left shrink-0
+                        ${isLocked 
+                          ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed' 
+                          : isSelected 
+                            ? 'bg-indigo-50 border-indigo-500 ring-1 ring-indigo-500 shadow-sm' 
+                            : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-md'
+                        }
+                      `}
+                    >
+                      <div className="flex justify-between w-full mb-1">
+                        <span className={`text-xs font-bold uppercase tracking-wider ${isSelected ? 'text-indigo-700' : 'text-slate-500'}`}>
+                          {sprint.title}
+                        </span>
+                        {isLocked && <Lock className="w-3 h-3 text-slate-400" />}
+                        {isActive && !isLocked && (
+                          <span className="flex h-2 w-2 relative">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                          </span>
+                        )}
+                      </div>
+                      <div className={`text-sm font-semibold ${isSelected ? 'text-indigo-900' : 'text-slate-700'}`}>
+                        {sprint.period}
+                      </div>
+                      <div className="mt-2 text-[10px] text-slate-400 flex items-center gap-1">
+                        {isLocked ? (
+                          <span>Opens {sprint.startDate.toLocaleDateString(undefined, {month: 'short', day: 'numeric'})}</span>
+                        ) : (
+                          isActive ? <span className="text-green-600 font-medium flex items-center gap-1"><Clock className="w-3 h-3"/> In Progress</span> : <span className="flex items-center gap-1"><CalendarRange className="w-3 h-3"/> Completed</span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+          ) : (
+             <div className="text-xs text-slate-400">No scheduled sprints available.</div>
+          )}
         </div>
       </header>
 

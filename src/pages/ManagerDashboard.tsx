@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Users, Briefcase, Calendar, Award, Trash2, Plus, Check, X, Clock, Map, UserMinus, Trophy, LogOut, Settings2 } from "lucide-react";
+import { Users, Briefcase, Calendar, Award, Trash2, Plus, Check, X, Clock, Map, UserMinus, Trophy, LogOut, Settings2, Edit } from "lucide-react";
 import { auth, artManagerActions, adminActions, sprintStorage, awardStorage, employeeStorage, nominationStorage, StoredUser, ART, Team, StoredSprint, StoredAward, STORAGE_KEYS } from "@/lib/localStorage";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -33,14 +33,20 @@ const ManagerDashboard = () => {
   const [deptName, setDeptName] = useState("");
   const [teamName, setTeamName] = useState("");
   const [teamDesc, setTeamDesc] = useState("");
+  
+  // Sprint Custom Dates
   const [sprintTitle, setSprintTitle] = useState("");
+  const [sprintStartDate, setSprintStartDate] = useState("");
+  const [sprintEndDate, setSprintEndDate] = useState("");
+
   const [awardName, setAwardName] = useState("");
   
-  // Specific Selectors
+  // Specific Selectors & Modals
   const [approvalArtSelections, setApprovalArtSelections] = useState<Record<string, string>>({});
   const [selectedArtForTeam, setSelectedArtForTeam] = useState("");
   const [selectedArtToUpdate, setSelectedArtToUpdate] = useState(""); 
   const [managingTeam, setManagingTeam] = useState<Team | null>(null);
+  const [isArtUpdateModalOpen, setIsArtUpdateModalOpen] = useState(false); // FIXED: Update ART is now a clean modal
 
   useEffect(() => {
     const user = auth.getCurrentUser('art-manager');
@@ -71,7 +77,6 @@ const ManagerDashboard = () => {
     const myTeams = allTeams.filter(t => myArts.some(a => a.id === t.artId));
     setTeams(myTeams);
 
-    // FIXED: Load Sprints & Awards isolated for this specific manager
     const loadedSprints = sprintStorage.getSprints(managerId);
     setSprints(loadedSprints);
     setAwards(awardStorage.getAwards(managerId));
@@ -273,36 +278,35 @@ const ManagerDashboard = () => {
                             </div>
                         )}
 
-                        <div className="pt-4 border-t border-slate-100">
-                            <h4 className="text-sm font-bold mb-4 text-slate-800">{arts.length > 0 ? "Update ART Details" : "Create Your First ART"}</h4>
-                            <form onSubmit={arts.length > 0 ? handleUpdateART : handleCreateART} className="space-y-4">
-                                
-                                {arts.length > 1 && (
-                                    <div className="space-y-1.5">
-                                        <label className="text-xs font-bold text-slate-700">Select ART to Update</label>
-                                        <select 
-                                            className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
-                                            value={selectedArtToUpdate}
-                                            onChange={e => handleArtSelection(e.target.value)}
-                                        >
-                                            {arts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                                        </select>
-                                    </div>
-                                )}
-
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-bold text-slate-700">ART Name</label>
-                                    <Input placeholder="Specific ART Name (e.g. Platform)" value={artName} onChange={e => setArtName(e.target.value)} required className="bg-slate-50 border-slate-200" />
-                                </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-bold text-slate-700">Department</label>
-                                    <Input placeholder="Department" value={deptName} onChange={e => setDeptName(e.target.value)} required className="bg-slate-50 border-slate-200" />
-                                </div>
-                                <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 mt-2">
-                                    {arts.length > 0 ? "Save Changes" : "Add ART"}
+                        {/* FIXED: Replaced inline update form with a clean modal button */}
+                        {arts.length > 0 ? (
+                            <div className="pt-4 border-t border-slate-100">
+                                <Button 
+                                    variant="outline" 
+                                    className="w-full text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                                    onClick={() => setIsArtUpdateModalOpen(true)}
+                                >
+                                    <Edit className="w-4 h-4 mr-2" /> Update ART Details
                                 </Button>
-                            </form>
-                        </div>
+                            </div>
+                        ) : (
+                            <div className="pt-4 border-t border-slate-100">
+                                <h4 className="text-sm font-bold mb-4 text-slate-800">Create Your First ART</h4>
+                                <form onSubmit={handleCreateART} className="space-y-4">
+                                    <div className="space-y-1.5">
+                                        <label className="text-xs font-bold text-slate-700">ART Name</label>
+                                        <Input placeholder="Specific ART Name (e.g. Platform)" value={artName} onChange={e => setArtName(e.target.value)} required className="bg-slate-50 border-slate-200" />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-xs font-bold text-slate-700">Department</label>
+                                        <Input placeholder="Department" value={deptName} onChange={e => setDeptName(e.target.value)} required className="bg-slate-50 border-slate-200" />
+                                    </div>
+                                    <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 mt-2">
+                                        Add ART
+                                    </Button>
+                                </form>
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
             </div>
@@ -412,15 +416,39 @@ const ManagerDashboard = () => {
                             {activeSprint && <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">Active: {activeSprint.title}</Badge>}
                         </CardTitle>
                     </CardHeader>
-                    <CardContent className="space-y-3">
-                        <p className="text-xs text-slate-500 mb-2">Creating a new phase will close the current one and reset the active leaderboard for your employees.</p>
-                        <Input placeholder="New Sprint Phase Title (e.g. Q3 Release)" value={sprintTitle} onChange={e => setSprintTitle(e.target.value)} />
-                        {/* FIXED: Passing currentUser.id to strictly isolate this sprint to this manager */}
-                        <Button className="w-full bg-emerald-600 hover:bg-emerald-700" onClick={() => {
-                            if(!sprintTitle.trim()) return;
-                            sprintStorage.addSprint(sprintTitle.trim(), currentUser.id);
-                            setSprintTitle(""); loadData(currentUser.id); toast.success("New Isolated Phase Started!");
-                        }}>Start New Sprint Phase</Button>
+                    <CardContent className="space-y-4">
+                        <p className="text-xs text-slate-500 mb-2">Configure precise quarterly intervals for your teams. Creating a new phase will automatically complete the previous active one.</p>
+                        
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-slate-700">Sprint Title</label>
+                            <Input placeholder="e.g. Q3 Release Phase" value={sprintTitle} onChange={e => setSprintTitle(e.target.value)} />
+                        </div>
+                        
+                        {/* FIXED: Added Start and End Date selection for proper Quarterly Sprints */}
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-bold text-slate-700">Start Date</label>
+                                <Input type="date" value={sprintStartDate} onChange={e => setSprintStartDate(e.target.value)} required />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-bold text-slate-700">End Date</label>
+                                <Input type="date" value={sprintEndDate} onChange={e => setSprintEndDate(e.target.value)} required />
+                            </div>
+                        </div>
+
+                        <Button className="w-full bg-emerald-600 hover:bg-emerald-700 mt-2" onClick={() => {
+                            if(!sprintTitle.trim() || !sprintStartDate || !sprintEndDate) {
+                                toast.error("Please fill in the title and both dates.");
+                                return;
+                            }
+                            if (new Date(sprintStartDate) > new Date(sprintEndDate)) {
+                                toast.error("Start date must be before the end date.");
+                                return;
+                            }
+                            sprintStorage.addSprint(sprintTitle.trim(), sprintStartDate, sprintEndDate, currentUser.id);
+                            setSprintTitle(""); setSprintStartDate(""); setSprintEndDate(""); 
+                            loadData(currentUser.id); toast.success("New Scheduled Phase Started!");
+                        }}>Save Scheduled Sprint</Button>
                     </CardContent>
                 </Card>
 
@@ -429,7 +457,6 @@ const ManagerDashboard = () => {
                     <CardContent className="space-y-3">
                         <div className="flex gap-2">
                             <Input placeholder="Award Title (e.g., Code Wizard)" value={awardName} onChange={e => setAwardName(e.target.value)} />
-                            {/* FIXED: Passing currentUser.id to strictly isolate this award to this manager */}
                             <Button size="icon" onClick={() => {
                                 if(!awardName.trim()) return;
                                 awardStorage.addAward(awardName.trim(), "Special Recognition", currentUser.id);
@@ -454,8 +481,6 @@ const ManagerDashboard = () => {
       {managingTeam && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-                  
-                  {/* Modal Header */}
                   <div className="p-6 border-b border-slate-100 flex justify-between items-start bg-slate-50 relative">
                       <div className="absolute top-0 left-0 w-full h-1 bg-indigo-500" />
                       <div>
@@ -470,7 +495,6 @@ const ManagerDashboard = () => {
                       </button>
                   </div>
                   
-                  {/* Modal Body (Members List) */}
                   <div className="p-6 overflow-y-auto custom-scrollbar flex-1 space-y-4">
                       <div className="flex items-center justify-between mb-2">
                           <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
@@ -522,7 +546,6 @@ const ManagerDashboard = () => {
                       </div>
                   </div>
                   
-                  {/* Modal Footer (Danger Zone) */}
                   <div className="p-5 border-t border-slate-200 bg-red-50/50 flex flex-col sm:flex-row justify-between items-center gap-4">
                       <div>
                           <h4 className="text-sm font-bold text-red-800 flex items-center gap-2">Danger Zone</h4>
@@ -534,6 +557,49 @@ const ManagerDashboard = () => {
                   </div>
               </div>
           </div>
+      )}
+
+      {/* OVERLAY MODAL: UPDATE ART DETAILS */}
+      {isArtUpdateModalOpen && (
+       <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+             <div className="p-6 border-b border-slate-100 flex justify-between items-start bg-slate-50 relative">
+                 <div className="absolute top-0 left-0 w-full h-1 bg-indigo-500" />
+                 <div>
+                     <h2 className="text-xl font-bold text-slate-900">Update ART Details</h2>
+                     <p className="text-sm text-slate-500 mt-1">Modify your Release Train setup</p>
+                 </div>
+                 <button onClick={() => setIsArtUpdateModalOpen(false)} className="text-slate-400 hover:text-slate-700 bg-white p-2 rounded-full shadow-sm border border-slate-100 transition-colors">
+                     <X className="w-5 h-5" />
+                 </button>
+             </div>
+             <form onSubmit={(e) => { handleUpdateART(e); setIsArtUpdateModalOpen(false); }} className="p-6 space-y-5">
+                 {arts.length > 1 && (
+                     <div className="space-y-1.5">
+                         <label className="text-xs font-bold text-slate-700">Select ART to Update</label>
+                         <select 
+                             className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                             value={selectedArtToUpdate}
+                             onChange={e => handleArtSelection(e.target.value)}
+                         >
+                             {arts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                         </select>
+                     </div>
+                 )}
+                 <div className="space-y-1.5">
+                     <label className="text-xs font-bold text-slate-700">ART Name</label>
+                     <Input placeholder="Specific ART Name (e.g. Platform)" value={artName} onChange={e => setArtName(e.target.value)} required className="h-11" />
+                 </div>
+                 <div className="space-y-1.5">
+                     <label className="text-xs font-bold text-slate-700">Department</label>
+                     <Input placeholder="Department" value={deptName} onChange={e => setDeptName(e.target.value)} required className="h-11" />
+                 </div>
+                 <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 mt-2 py-6 text-md font-bold">
+                     Save Changes
+                 </Button>
+             </form>
+          </div>
+       </div>
       )}
     </div>
   );
