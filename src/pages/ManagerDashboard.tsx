@@ -3,31 +3,47 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { ArrowLeft, Users, Briefcase, Calendar, Award, Trash2, Plus, Check, X, Clock, Map, UserMinus } from "lucide-react";
-import { auth, artManagerActions, adminActions, sprintStorage, awardStorage, StoredUser, ART, Team, StoredSprint, StoredAward } from "@/lib/localStorage";
+import { Users, Briefcase, Calendar, Award, Trash2, Plus, Check, X, Clock, Map, UserMinus, Trophy, LogOut, Settings2 } from "lucide-react";
+import { auth, artManagerActions, adminActions, sprintStorage, awardStorage, employeeStorage, nominationStorage, StoredUser, ART, Team, StoredSprint, StoredAward, STORAGE_KEYS } from "@/lib/localStorage";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { Employee } from "@/types/employee";
+
+const SCALING_FACTOR = 3.0;
+const BASE_VOTE_VALUE = 50;
+
+interface ManagedUserWithScore extends StoredUser {
+    totalScore?: number;
+}
 
 const ManagerDashboard = () => {
   const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState<any>(null);
   
   const [pendingEmployees, setPendingEmployees] = useState<StoredUser[]>([]);
-  const [managedEmployees, setManagedEmployees] = useState<StoredUser[]>([]);
+  const [managedEmployees, setManagedEmployees] = useState<ManagedUserWithScore[]>([]);
+  const [allEmployeesList, setAllEmployeesList] = useState<Employee[]>([]); 
   const [arts, setArts] = useState<ART[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [sprints, setSprints] = useState<StoredSprint[]>([]);
   const [awards, setAwards] = useState<StoredAward[]>([]);
 
+  // Form States
   const [artName, setArtName] = useState("");
   const [deptName, setDeptName] = useState("");
   const [teamName, setTeamName] = useState("");
   const [teamDesc, setTeamDesc] = useState("");
   const [sprintTitle, setSprintTitle] = useState("");
   const [awardName, setAwardName] = useState("");
+  
+  // Specific Selectors
+  const [approvalArtSelections, setApprovalArtSelections] = useState<Record<string, string>>({});
+  const [selectedArtForTeam, setSelectedArtForTeam] = useState("");
+  const [selectedArtToUpdate, setSelectedArtToUpdate] = useState(""); 
+  const [managingTeam, setManagingTeam] = useState<Team | null>(null);
 
   useEffect(() => {
-    const user = auth.getCurrentUser();
+    const user = auth.getCurrentUser('art-manager');
     if (!user || user.role !== 'art-manager') {
         navigate("/");
         return;
@@ -38,18 +54,53 @@ const ManagerDashboard = () => {
 
   const loadData = (managerId: string) => {
     setPendingEmployees(artManagerActions.getPendingEmployees());
-    setManagedEmployees(artManagerActions.getManagedEmployees(managerId)); 
     
     const allArts = artManagerActions.getARTs();
     const myArts = allArts.filter(a => a.managerId === managerId);
     setArts(myArts);
 
+    if (myArts.length > 0) {
+        const targetId = selectedArtToUpdate || myArts[0].id;
+        const art = myArts.find(a => a.id === targetId) || myArts[0];
+        setSelectedArtToUpdate(art.id);
+        setArtName(art.name);
+        setDeptName(art.department);
+    }
+
     const allTeams = artManagerActions.getTeams();
     const myTeams = allTeams.filter(t => myArts.some(a => a.id === t.artId));
     setTeams(myTeams);
 
-    setSprints(sprintStorage.getSprints());
-    setAwards(awardStorage.getAwards());
+    // FIXED: Load Sprints & Awards isolated for this specific manager
+    const loadedSprints = sprintStorage.getSprints(managerId);
+    setSprints(loadedSprints);
+    setAwards(awardStorage.getAwards(managerId));
+
+    const activeS = loadedSprints.find(s => s.status === 'active') || loadedSprints[loadedSprints.length - 1];
+    const allNoms = nominationStorage.getNominations();
+    const allEmployees = employeeStorage.getEmployees();
+    setAllEmployeesList(allEmployees);
+    
+    const rawEmps = artManagerActions.getManagedEmployees(managerId);
+    
+    const empsWithScores = rawEmps.map(emp => {
+        let score = 0;
+        if (activeS) {
+            const teamSize = allEmployees.filter(e => e.teamId === emp.teamId).length;
+            const potentialVoters = Math.max(1, teamSize - 1); 
+            const fairnessMultiplier = SCALING_FACTOR / Math.sqrt(potentialVoters);
+            
+            const activeStart = new Date(activeS.startDate).getTime();
+            const activeEnd = new Date(activeS.endDate).getTime();
+
+            const received = allNoms.filter(n => n.nomineeId === emp.id && new Date(n.timestamp).getTime() >= activeStart && new Date(n.timestamp).getTime() <= activeEnd);
+            
+            score += received.length * Math.round(BASE_VOTE_VALUE * fairnessMultiplier);
+        }
+        return { ...emp, totalScore: score };
+    });
+
+    setManagedEmployees(empsWithScores);
   };
 
   const handleApprove = (id: string) => {
@@ -57,9 +108,12 @@ const ManagerDashboard = () => {
          toast.error("Please create your ART first.");
          return;
     }
-    const artToAssign = arts[0].id;
+    
+    const artToAssign = approvalArtSelections[id] || arts[0].id;
+    const selectedArtData = arts.find(a => a.id === artToAssign);
+
     if(artManagerActions.approveEmployee(id, artToAssign)) {
-        toast.success(`Employee approved & assigned to ${arts[0].name}`);
+        toast.success(`Employee approved & assigned to ${selectedArtData?.name}`);
         loadData(currentUser.id);
     }
   };
@@ -73,22 +127,45 @@ const ManagerDashboard = () => {
 
   const handleCreateART = (e: React.FormEvent) => {
     e.preventDefault();
-    if (arts.length > 0) {
-        toast.error("You can only manage one ART.");
-        return;
-    }
     artManagerActions.createART(artName, deptName, currentUser.id);
-    toast.success("ART Created");
-    setArtName(""); setDeptName("");
+    toast.success("ART Created Successfully!");
     loadData(currentUser.id);
+  };
+
+  const handleUpdateART = (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetId = selectedArtToUpdate || (arts.length > 0 ? arts[0].id : null);
+    if (!targetId) return;
+
+    const allArts = JSON.parse(localStorage.getItem(STORAGE_KEYS.ARTS) || "[]");
+    const artIndex = allArts.findIndex((a: ART) => a.id === targetId);
+    
+    if (artIndex !== -1) {
+        allArts[artIndex].name = artName;
+        allArts[artIndex].department = deptName;
+        localStorage.setItem(STORAGE_KEYS.ARTS, JSON.stringify(allArts));
+        toast.success("ART Details Updated!");
+        loadData(currentUser.id);
+    }
+  };
+
+  const handleArtSelection = (artId: string) => {
+    setSelectedArtToUpdate(artId);
+    const art = arts.find(a => a.id === artId);
+    if (art) {
+        setArtName(art.name);
+        setDeptName(art.department);
+    }
   };
 
   const handleCreateTeam = (e: React.FormEvent) => {
     e.preventDefault();
     if (arts.length === 0) return toast.error("Create an ART first");
     
-    artManagerActions.createTeam(arts[0].id, teamName, teamDesc);
-    toast.success("Team Created");
+    const targetArtId = selectedArtForTeam || arts[0].id;
+    
+    artManagerActions.createTeam(targetArtId, teamName, teamDesc);
+    toast.success("Specific Team Created!");
     setTeamName(""); setTeamDesc("");
     loadData(currentUser.id);
   };
@@ -96,6 +173,7 @@ const ManagerDashboard = () => {
   const handleDeleteTeam = (id: string) => {
     artManagerActions.deleteTeam(id);
     toast.success("Team deleted");
+    setManagingTeam(null); 
     loadData(currentUser.id);
   };
 
@@ -111,12 +189,28 @@ const ManagerDashboard = () => {
   const activeSprint = sprints.find(s => s.status === 'active');
 
   return (
-    <div className="min-h-screen bg-slate-50 p-8">
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8">
       <div className="max-w-7xl mx-auto space-y-8">
-        <div className="flex items-center justify-between">
-            <Button variant="ghost" onClick={() => navigate("/home")} className="pl-0"><ArrowLeft className="w-4 h-4 mr-2" /> Back to Workspace</Button>
-            <h1 className="text-2xl font-bold text-slate-800">Train Manager Console</h1>
-        </div>
+        
+        {/* BEAUTIFUL WELCOME BANNER */}
+        <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-xl shadow-indigo-500/20">
+            <div className="relative z-10 p-6 md:p-10 flex flex-col md:flex-row items-center justify-between gap-6">
+                <div className="flex items-center gap-6">
+                    <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-2xl font-bold border-2 border-white/30 overflow-hidden">
+                        {currentUser?.firstName?.charAt(0) || 'M'}
+                    </div>
+                    <div className="text-center md:text-left">
+                        <h2 className="text-3xl font-bold mb-2">Welcome aboard, {currentUser?.firstName}! 👋</h2>
+                        <p className="text-indigo-100 text-lg max-w-xl">
+                            Manage your Agile Release Trains, approve team members, and control sprint phases.
+                        </p>
+                    </div>
+                </div>
+                <Button variant="secondary" onClick={() => { auth.logout('art-manager'); navigate("/"); }} className="bg-white/20 text-white hover:bg-white/30 border-0 backdrop-blur-md whitespace-nowrap">
+                    <LogOut className="w-4 h-4 mr-2" /> Logout
+                </Button>
+            </div>
+        </section>
 
         {/* 1. PENDING REQUESTS */}
         <Card className="border-amber-200 bg-amber-50/50">
@@ -127,9 +221,24 @@ const ManagerDashboard = () => {
                         <div key={req.id} className="bg-white p-4 rounded-xl border border-amber-100 flex justify-between items-center shadow-sm">
                             <div><p className="font-bold text-slate-900">{req.firstName} {req.lastName}</p><p className="text-xs text-slate-500">Requested: {new Date(req.createdAt).toLocaleDateString()}</p></div>
                             <div className="flex items-center gap-2">
-                                <span className="text-xs text-slate-500 mr-2 flex items-center gap-1">
-                                    Assigning to: <Badge variant="outline" className="bg-indigo-50 border-indigo-200 text-indigo-700">{arts.length > 0 ? arts[0].name : "No ART"}</Badge>
+                                
+                                <span className="text-xs text-slate-500 mr-2 flex items-center gap-2">
+                                    Assigning to: 
+                                    {arts.length === 0 ? (
+                                        <Badge variant="outline" className="bg-slate-50 text-slate-500">No ARTs Available</Badge>
+                                    ) : arts.length === 1 ? (
+                                        <Badge variant="outline" className="bg-indigo-50 border-indigo-200 text-indigo-700">{arts[0].name}</Badge>
+                                    ) : (
+                                        <select 
+                                            className="text-xs border border-indigo-200 rounded-md px-2 py-1 bg-indigo-50 text-indigo-800 font-medium outline-none cursor-pointer hover:border-indigo-400 transition-colors"
+                                            value={approvalArtSelections[req.id] || arts[0].id}
+                                            onChange={e => setApprovalArtSelections({...approvalArtSelections, [req.id]: e.target.value})}
+                                        >
+                                            {arts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                                        </select>
+                                    )}
                                 </span>
+
                                 <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:bg-red-50" onClick={() => handleReject(req.id)}><X className="w-4 h-4" /></Button>
                                 <Button size="icon" className="h-8 w-8 bg-green-600 hover:bg-green-700" onClick={() => handleApprove(req.id)} disabled={arts.length === 0}><Check className="w-4 h-4" /></Button>
                             </div>
@@ -140,27 +249,60 @@ const ManagerDashboard = () => {
         </Card>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* SETUP ART */}
+            {/* SETUP & LIST ARTS */}
             <div className="space-y-6">
                 <Card>
-                    <CardHeader><CardTitle className="text-lg flex items-center gap-2"><Map className="w-5 h-5 text-indigo-600"/> Your ART</CardTitle></CardHeader>
+                    <CardHeader><CardTitle className="text-lg flex items-center gap-2"><Map className="w-5 h-5 text-indigo-600"/> Your ARTs</CardTitle></CardHeader>
                     <CardContent>
-                        {arts.length > 0 ? (
-                             <div className="p-5 bg-indigo-50 border border-indigo-100 rounded-xl text-center space-y-2">
-                                 <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center mx-auto shadow-sm text-indigo-600"><Briefcase className="w-6 h-6"/></div>
-                                 <div>
-                                    <p className="text-lg text-indigo-900 font-bold">{arts[0].name}</p>
-                                    <p className="text-sm text-indigo-600 font-medium">{arts[0].department}</p>
-                                 </div>
-                                 <Badge className="bg-indigo-200 text-indigo-800 hover:bg-indigo-200 border-0 mt-2">Active</Badge>
-                             </div>
-                        ) : (
-                            <form onSubmit={handleCreateART} className="space-y-3">
-                                <Input placeholder="ART Name (e.g. Omega Train)" value={artName} onChange={e => setArtName(e.target.value)} required />
-                                <Input placeholder="Department" value={deptName} onChange={e => setDeptName(e.target.value)} required />
-                                <Button type="submit" className="w-full bg-indigo-600">Create ART</Button>
-                            </form>
+                        {arts.length > 0 && (
+                            <div className="space-y-3 mb-6 max-h-48 overflow-y-auto custom-scrollbar pr-2">
+                                {arts.map(art => (
+                                     <div key={art.id} className="p-3.5 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center justify-between shadow-sm">
+                                         <div className="flex items-center gap-3">
+                                             <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm text-indigo-600 shrink-0">
+                                                 <Briefcase className="w-5 h-5"/>
+                                             </div>
+                                             <div>
+                                                <p className="text-sm text-indigo-900 font-bold leading-tight">{art.name}</p>
+                                                <p className="text-[11px] text-indigo-600 font-medium">{art.department}</p>
+                                             </div>
+                                         </div>
+                                         <Badge className="bg-indigo-200 text-indigo-800 hover:bg-indigo-200 border-0 text-[10px]">Active</Badge>
+                                     </div>
+                                ))}
+                            </div>
                         )}
+
+                        <div className="pt-4 border-t border-slate-100">
+                            <h4 className="text-sm font-bold mb-4 text-slate-800">{arts.length > 0 ? "Update ART Details" : "Create Your First ART"}</h4>
+                            <form onSubmit={arts.length > 0 ? handleUpdateART : handleCreateART} className="space-y-4">
+                                
+                                {arts.length > 1 && (
+                                    <div className="space-y-1.5">
+                                        <label className="text-xs font-bold text-slate-700">Select ART to Update</label>
+                                        <select 
+                                            className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                                            value={selectedArtToUpdate}
+                                            onChange={e => handleArtSelection(e.target.value)}
+                                        >
+                                            {arts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                                        </select>
+                                    </div>
+                                )}
+
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-bold text-slate-700">ART Name</label>
+                                    <Input placeholder="Specific ART Name (e.g. Platform)" value={artName} onChange={e => setArtName(e.target.value)} required className="bg-slate-50 border-slate-200" />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-bold text-slate-700">Department</label>
+                                    <Input placeholder="Department" value={deptName} onChange={e => setDeptName(e.target.value)} required className="bg-slate-50 border-slate-200" />
+                                </div>
+                                <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 mt-2">
+                                    {arts.length > 0 ? "Save Changes" : "Add ART"}
+                                </Button>
+                            </form>
+                        </div>
                     </CardContent>
                 </Card>
             </div>
@@ -168,15 +310,35 @@ const ManagerDashboard = () => {
             {/* MANAGE TEAMS */}
             <div className="lg:col-span-2 space-y-6">
                 <Card>
-                    <CardHeader><CardTitle className="text-lg flex items-center gap-2"><Users className="w-5 h-5 text-indigo-600"/> Manage Teams</CardTitle></CardHeader>
+                    <CardHeader><CardTitle className="text-lg flex items-center gap-2"><Users className="w-5 h-5 text-indigo-600"/> Manage Specific Teams</CardTitle></CardHeader>
                     <CardContent className="space-y-6">
                         {arts.length > 0 ? (
-                            <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                                <h4 className="text-sm font-bold mb-4">Create New Team under {arts[0].name}</h4>
-                                <form onSubmit={handleCreateTeam} className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    <Input placeholder="Team Name" value={teamName} onChange={e => setTeamName(e.target.value)} required />
-                                    <Input placeholder="Description" value={teamDesc} onChange={e => setTeamDesc(e.target.value)} className="md:col-span-2" />
-                                    <Button type="submit" className="md:col-span-2 bg-slate-900 text-white">Add Team</Button>
+                            <div className="p-5 bg-slate-50 rounded-xl border border-slate-100 shadow-sm">
+                                <h4 className="text-sm font-bold mb-4 text-slate-800">Create New Specific Team</h4>
+                                <form onSubmit={handleCreateTeam} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    
+                                    {arts.length > 1 && (
+                                        <div className="md:col-span-2 space-y-1.5">
+                                            <label className="text-xs font-bold text-slate-700">Assign to Specific ART</label>
+                                            <select 
+                                                className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                                                value={selectedArtForTeam || arts[0].id}
+                                                onChange={e => setSelectedArtForTeam(e.target.value)}
+                                            >
+                                                {arts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                                            </select>
+                                        </div>
+                                    )}
+
+                                    <div className="space-y-1.5">
+                                        <label className="text-xs font-bold text-slate-700">Team Name</label>
+                                        <Input placeholder="e.g. Frontend Ninjas" value={teamName} onChange={e => setTeamName(e.target.value)} required className="bg-white" />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-xs font-bold text-slate-700">Description</label>
+                                        <Input placeholder="Short focus description" value={teamDesc} onChange={e => setTeamDesc(e.target.value)} className="bg-white" />
+                                    </div>
+                                    <Button type="submit" className="md:col-span-2 bg-slate-900 text-white hover:bg-slate-800 py-5">Add Team</Button>
                                 </form>
                             </div>
                         ) : (
@@ -184,38 +346,53 @@ const ManagerDashboard = () => {
                         )}
 
                         <div className="space-y-3">
-                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Active Teams</h4>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Your specific Active Teams</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                                 {teams.map(t => {
                                     const members = managedEmployees.filter(e => e.teamId === t.id);
+                                    const sortedMembers = [...members].sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0));
+                                    const top3 = sortedMembers.filter(m => (m.totalScore || 0) > 0).slice(0, 3);
 
                                     return (
-                                        <div key={t.id} className="p-4 bg-white border rounded-2xl shadow-sm hover:shadow-md transition-all">
-                                            <div className="flex justify-between items-start mb-3">
+                                        <div 
+                                            key={t.id} 
+                                            className="p-5 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-lg hover:border-indigo-300 cursor-pointer group transition-all"
+                                            onClick={() => setManagingTeam(t)}
+                                        >
+                                            <div className="flex justify-between items-start mb-4">
                                                 <div>
-                                                    <p className="font-bold text-slate-900">{t.name}</p>
-                                                    <p className="text-xs text-slate-400 line-clamp-1">{t.description}</p>
+                                                    <p className="font-bold text-slate-900 text-lg group-hover:text-indigo-600 transition-colors">{t.name}</p>
+                                                    <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-wide mb-1">{arts.find(a => a.id === t.artId)?.name}</p>
+                                                    <p className="text-xs text-slate-500 line-clamp-1 mt-0.5">{t.description}</p>
                                                 </div>
-                                                <Button size="icon" variant="ghost" className="text-slate-300 hover:text-red-500" onClick={() => handleDeleteTeam(t.id)}><Trash2 className="w-3 h-3"/></Button>
+                                                <Badge variant="secondary" className="bg-slate-100 text-slate-600 border-0">{members.length} Members</Badge>
                                             </div>
                                             
-                                            <div className="bg-slate-50 rounded-lg p-3 space-y-2">
-                                                <div className="flex justify-between items-center text-[10px] uppercase font-bold text-slate-400 mb-1">
-                                                    <span>Members</span>
-                                                    <span className="bg-slate-200 px-1.5 rounded text-slate-600">{members.length}</span>
+                                            <div className="bg-gradient-to-br from-amber-50 to-yellow-50/30 rounded-xl p-3 border border-amber-100 mb-4">
+                                                <div className="flex items-center gap-1.5 text-[10px] font-bold text-amber-700 uppercase tracking-wider mb-2">
+                                                    <Trophy className="w-3.5 h-3.5" /> Top 3 Performers
                                                 </div>
-                                                {members.length === 0 ? (
-                                                    <p className="text-xs text-slate-400 italic text-center py-2">No members enrolled</p>
+                                                {top3.length === 0 ? (
+                                                    <p className="text-[11px] text-amber-600/70 italic text-center py-2">No scores logged yet</p>
                                                 ) : (
-                                                    <div className="space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
-                                                        {members.map(m => (
-                                                            <div key={m.id} className="flex justify-between items-center bg-white p-2 rounded border border-slate-100 text-xs shadow-sm">
-                                                                <span className="font-medium text-slate-700 truncate max-w-[120px]">{m.firstName} {m.lastName}</span>
-                                                                <button onClick={() => handleRemoveFromTeam(m.id)} className="text-red-400 hover:text-red-600 p-1 hover:bg-red-50 rounded transition-colors"><UserMinus className="w-3 h-3" /></button>
+                                                    <div className="space-y-1.5">
+                                                        {top3.map((m, idx) => (
+                                                            <div key={`top_${m.id}`} className="flex justify-between items-center bg-white/80 p-1.5 rounded-lg border border-amber-100/50 text-xs shadow-sm">
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="font-bold w-4 text-center">
+                                                                        {idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}
+                                                                    </span>
+                                                                    <span className="font-semibold text-slate-800 truncate max-w-[100px]">{m.firstName} {m.lastName}</span>
+                                                                </div>
+                                                                <Badge variant="secondary" className="text-[10px] bg-amber-100 text-amber-800 border-0">{m.totalScore} pts</Badge>
                                                             </div>
                                                         ))}
                                                     </div>
                                                 )}
+                                            </div>
+
+                                            <div className="text-center text-xs font-bold text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                                                <Settings2 className="w-3.5 h-3.5" /> Click to Manage Team Members
                                             </div>
                                         </div>
                                     );
@@ -236,11 +413,13 @@ const ManagerDashboard = () => {
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3">
-                        <p className="text-xs text-slate-500 mb-2">Creating a new phase will close the current one and reset the active leaderboard for employees.</p>
+                        <p className="text-xs text-slate-500 mb-2">Creating a new phase will close the current one and reset the active leaderboard for your employees.</p>
                         <Input placeholder="New Sprint Phase Title (e.g. Q3 Release)" value={sprintTitle} onChange={e => setSprintTitle(e.target.value)} />
-                        <Button className="w-full bg-emerald-600" onClick={() => {
-                            sprintStorage.addSprint(sprintTitle);
-                            setSprintTitle(""); loadData(currentUser.id); toast.success("New Phase Started!");
+                        {/* FIXED: Passing currentUser.id to strictly isolate this sprint to this manager */}
+                        <Button className="w-full bg-emerald-600 hover:bg-emerald-700" onClick={() => {
+                            if(!sprintTitle.trim()) return;
+                            sprintStorage.addSprint(sprintTitle.trim(), currentUser.id);
+                            setSprintTitle(""); loadData(currentUser.id); toast.success("New Isolated Phase Started!");
                         }}>Start New Sprint Phase</Button>
                     </CardContent>
                 </Card>
@@ -250,10 +429,11 @@ const ManagerDashboard = () => {
                     <CardContent className="space-y-3">
                         <div className="flex gap-2">
                             <Input placeholder="Award Title (e.g., Code Wizard)" value={awardName} onChange={e => setAwardName(e.target.value)} />
+                            {/* FIXED: Passing currentUser.id to strictly isolate this award to this manager */}
                             <Button size="icon" onClick={() => {
                                 if(!awardName.trim()) return;
-                                awardStorage.addAward(awardName.trim());
-                                setAwardName(""); loadData(currentUser.id); toast.success("Award Added");
+                                awardStorage.addAward(awardName.trim(), "Special Recognition", currentUser.id);
+                                setAwardName(""); loadData(currentUser.id); toast.success("Isolated Award Added");
                             }}><Plus className="w-4 h-4"/></Button>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -269,6 +449,92 @@ const ManagerDashboard = () => {
             </div>
         </div>
       </div>
+
+      {/* OVERLAY MODAL: TEAM MANAGEMENT */}
+      {managingTeam && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+                  
+                  {/* Modal Header */}
+                  <div className="p-6 border-b border-slate-100 flex justify-between items-start bg-slate-50 relative">
+                      <div className="absolute top-0 left-0 w-full h-1 bg-indigo-500" />
+                      <div>
+                          <Badge className="bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border-0 mb-2 uppercase tracking-widest text-[9px]">
+                              {arts.find(a => a.id === managingTeam.artId)?.name}
+                          </Badge>
+                          <h2 className="text-2xl font-bold text-slate-900">{managingTeam.name}</h2>
+                          <p className="text-sm text-slate-500 mt-1">{managingTeam.description}</p>
+                      </div>
+                      <button onClick={() => setManagingTeam(null)} className="text-slate-400 hover:text-slate-700 bg-white p-2 rounded-full shadow-sm border border-slate-100 transition-colors">
+                          <X className="w-5 h-5" />
+                      </button>
+                  </div>
+                  
+                  {/* Modal Body (Members List) */}
+                  <div className="p-6 overflow-y-auto custom-scrollbar flex-1 space-y-4">
+                      <div className="flex items-center justify-between mb-2">
+                          <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                              <Users className="w-4 h-4 text-indigo-500"/> Enrolled Team Members
+                          </h3>
+                          <Badge variant="secondary" className="bg-slate-100 text-slate-600">
+                              {managedEmployees.filter(e => e.teamId === managingTeam.id).length} Total
+                          </Badge>
+                      </div>
+                      
+                      <div className="space-y-3">
+                         {managedEmployees.filter(e => e.teamId === managingTeam.id).map(m => {
+                             const empRecord = allEmployeesList.find(e => e.id === m.id);
+                             
+                             return (
+                                 <div key={m.id} className="flex justify-between items-center p-3 border border-slate-100 rounded-xl bg-white shadow-sm hover:shadow transition-all group">
+                                     <div className="flex items-center gap-4">
+                                         <img 
+                                            src={empRecord?.profilePicture || `https://ui-avatars.com/api/?name=${m.firstName}+${m.lastName}&background=random`} 
+                                            alt="" 
+                                            className="w-10 h-10 rounded-full border border-slate-200 object-cover" 
+                                         />
+                                         <div>
+                                             <p className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                                                {m.firstName} {m.lastName} 
+                                                {m.createdBy === 'system_dummy' && <Badge variant="outline" className="text-[9px] bg-slate-50 text-slate-400 h-4 px-1 border-slate-200 font-normal">Dummy Account</Badge>}
+                                             </p>
+                                             <p className="text-xs text-slate-500">{empRecord?.jobTitle || "Team Member"}</p>
+                                         </div>
+                                     </div>
+                                     <div className="flex items-center gap-4">
+                                         <div className="text-right hidden sm:block">
+                                             <span className="text-lg font-bold text-amber-600">{m.totalScore || 0}</span>
+                                             <span className="text-[10px] text-amber-600/70 font-bold uppercase tracking-wider block leading-none">Points</span>
+                                         </div>
+                                         <Button size="sm" variant="outline" className="text-red-600 border-red-100 bg-red-50 hover:bg-red-600 hover:text-white transition-colors h-8" onClick={() => handleRemoveFromTeam(m.id)}>
+                                             <UserMinus className="w-4 h-4 sm:mr-1.5" /> <span className="hidden sm:inline">Remove</span>
+                                         </Button>
+                                     </div>
+                                 </div>
+                             );
+                         })}
+                         {managedEmployees.filter(e => e.teamId === managingTeam.id).length === 0 && (
+                             <div className="flex flex-col items-center justify-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-slate-400">
+                                 <UserMinus className="w-8 h-8 mb-2 opacity-50" />
+                                 <p className="text-sm font-medium">No members in this team yet.</p>
+                             </div>
+                         )}
+                      </div>
+                  </div>
+                  
+                  {/* Modal Footer (Danger Zone) */}
+                  <div className="p-5 border-t border-slate-200 bg-red-50/50 flex flex-col sm:flex-row justify-between items-center gap-4">
+                      <div>
+                          <h4 className="text-sm font-bold text-red-800 flex items-center gap-2">Danger Zone</h4>
+                          <p className="text-xs text-red-600/80 mt-0.5">Permanently delete this team and unassign all its members.</p>
+                      </div>
+                      <Button variant="destructive" className="bg-red-600 hover:bg-red-700 shadow-sm w-full sm:w-auto" onClick={() => handleDeleteTeam(managingTeam.id)}>
+                          <Trash2 className="w-4 h-4 mr-2" /> Delete Team
+                      </Button>
+                  </div>
+              </div>
+          </div>
+      )}
     </div>
   );
 };

@@ -2,22 +2,21 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-// ADDED: Briefcase to the imports
-import { ArrowLeft, Users, ShieldCheck, Check, X, Clock, Briefcase } from "lucide-react";
-import { auth, adminActions, StoredUser, employeeStorage } from "@/lib/localStorage";
+import { Users, Shield, Check, X, Clock, Database, Briefcase, Award, LogOut } from "lucide-react";
+import { auth, adminActions, artManagerActions, nominationStorage, StoredUser } from "@/lib/localStorage";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
-  
-  const [managementTeam, setManagementTeam] = useState<StoredUser[]>([]);
-  const [pendingRequests, setPendingRequests] = useState<StoredUser[]>([]);
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [stats, setStats] = useState({ totalEmployees: 0, totalManagement: 0, pending: 0 });
+  
+  const [pendingRequests, setPendingRequests] = useState<StoredUser[]>([]);
+  const [allUsers, setAllUsers] = useState<StoredUser[]>([]);
+  const [stats, setStats] = useState({ totalArts: 0, totalTeams: 0, totalNoms: 0 });
 
   useEffect(() => {
-    const user = auth.getCurrentUser();
+    const user = auth.getCurrentUser('admin'); 
     if (!user || user.role !== 'admin') {
         navigate("/");
         return;
@@ -27,160 +26,127 @@ const AdminDashboard = () => {
   }, [navigate]);
 
   const loadData = () => {
-    // 1. Fetch Pending Requests
-    const pending = adminActions.getPendingRequests(['art-manager', 'admin']);
-    setPendingRequests(pending);
+    setPendingRequests(adminActions.getPendingRequests(['admin', 'art-manager', 'employee']));
+    setAllUsers(adminActions.getAllUsers());
 
-    // 2. Fetch All Users to filter the Active Team
-    const allUsers = adminActions.getAllUsers();
-    
-    // Filter Active Management Team (Approved Admins + Art Managers)
-    const activeTeam = allUsers.filter(u => 
-        u.status === 'approved' && 
-        (u.role === 'art-manager' || u.role === 'admin')
-    );
-    
-    // Sort so Admins appear at top
-    activeTeam.sort((a, b) => (a.role === 'admin' ? -1 : 1));
-    setManagementTeam(activeTeam);
-    
-    // 3. Load Global Stats
-    const allEmps = employeeStorage.getEmployees();
-    
+    const arts = artManagerActions.getARTs();
+    const teams = artManagerActions.getTeams();
+    const noms = nominationStorage.getNominations();
+
     setStats({
-        totalEmployees: allEmps.length,
-        totalManagement: activeTeam.length,
-        pending: pending.length
+        totalArts: arts.length,
+        totalTeams: teams.length,
+        totalNoms: noms.length
     });
   };
 
-  const handleApprove = (userId: string) => {
-      if (adminActions.approveUser(userId)) {
-          toast.success("Request Approved");
-          loadData();
-      } else {
-          toast.error("Failed to approve");
-      }
+  const handleApprove = (id: string) => {
+    if(adminActions.approveUser(id)) {
+        toast.success("User approved");
+        loadData();
+    }
   };
 
-  const handleReject = (userId: string) => {
-      if (adminActions.rejectUser(userId)) {
-          toast.success("Request Rejected");
-          loadData();
-      } else {
-          toast.error("Failed to reject");
-      }
+  const handleReject = (id: string) => {
+    if(adminActions.rejectUser(id)) {
+        toast.success("User rejected");
+        loadData();
+    }
   };
-
-  const pendingAdmins = pendingRequests.filter(u => u.role === 'admin');
-  const pendingManagers = pendingRequests.filter(u => u.role === 'art-manager');
 
   return (
-    <div className="min-h-screen bg-slate-50 p-8">
-      <div className="max-w-6xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
-            <Button variant="ghost" onClick={() => navigate("/home")} className="pl-0 text-slate-500 hover:text-slate-800">
-                <ArrowLeft className="w-4 h-4 mr-2" /> Back to Workspace
-            </Button>
-            <h1 className="text-2xl font-bold text-slate-800">Admin Console</h1>
-        </div>
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8">
+      <div className="max-w-7xl mx-auto space-y-8">
+        
+        {/* BEAUTIFUL WELCOME BANNER */}
+        <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-purple-600 to-violet-800 text-white shadow-xl shadow-purple-500/20">
+            <div className="relative z-10 p-6 md:p-10 flex flex-col md:flex-row items-center justify-between gap-6">
+                <div className="flex items-center gap-6">
+                    <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-2xl font-bold border-2 border-white/30 overflow-hidden">
+                        {currentUser?.firstName?.charAt(0) || 'A'}
+                    </div>
+                    <div className="text-center md:text-left">
+                        <h2 className="text-3xl font-bold mb-2">Welcome back, {currentUser?.firstName}! 👋</h2>
+                        <p className="text-purple-100 text-lg max-w-xl">
+                            Oversee system metrics, manage access requests, and control platform settings.
+                        </p>
+                    </div>
+                </div>
+                <Button variant="secondary" onClick={() => { auth.logout('admin'); navigate("/"); }} className="bg-white/20 text-white hover:bg-white/30 border-0 backdrop-blur-md whitespace-nowrap">
+                    <LogOut className="w-4 h-4 mr-2" /> Logout
+                </Button>
+            </div>
+        </section>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-             <Card className="bg-slate-900 text-white border-0 shadow-lg">
-                <CardContent className="p-6 flex items-center justify-between">
-                    <div><p className="text-slate-400 text-sm">Leadership Team</p><h3 className="text-4xl font-bold mt-1">{stats.totalManagement}</h3></div>
-                    <div className="w-12 h-12 bg-white/10 rounded-full flex items-center justify-center"><ShieldCheck className="w-6 h-6" /></div>
+        {/* PENDING REQUESTS */}
+        <Card className="border-purple-200 bg-purple-50/50">
+            <CardHeader className="pb-3">
+                <CardTitle className="text-lg flex items-center gap-2 text-purple-800">
+                    <Clock className="w-5 h-5"/> Pending Access Requests ({pendingRequests.length})
+                </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                {pendingRequests.length === 0 ? <p className="text-sm text-purple-600 italic">No pending requests</p> :
+                    pendingRequests.map(req => (
+                        <div key={req.id} className="bg-white p-4 rounded-xl border border-purple-100 flex justify-between items-center shadow-sm">
+                            <div>
+                                <p className="font-bold text-slate-900">{req.firstName} {req.lastName}</p>
+                                <p className="text-xs text-slate-500 flex items-center gap-2 mt-1">
+                                    <Badge variant="outline" className={
+                                        req.role === 'admin' ? 'bg-purple-50 text-purple-700' :
+                                        req.role === 'art-manager' ? 'bg-indigo-50 text-indigo-700' : 
+                                        'bg-slate-50 text-slate-700'
+                                    }>
+                                        {req.role === 'admin' ? 'Admin' : req.role === 'art-manager' ? 'Train Manager' : 'Employee'}
+                                    </Badge>
+                                    Requested: {new Date(req.createdAt).toLocaleDateString()}
+                                </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:bg-red-50" onClick={() => handleReject(req.id)}><X className="w-4 h-4" /></Button>
+                                <Button size="icon" className="h-8 w-8 bg-green-600 hover:bg-green-700" onClick={() => handleApprove(req.id)}><Check className="w-4 h-4" /></Button>
+                            </div>
+                        </div>
+                    ))
+                }
+            </CardContent>
+        </Card>
+
+        {/* ALL-TIME SYSTEM STATS */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <Card>
+                <CardContent className="p-6 flex flex-col items-center justify-center text-center">
+                    <Users className="w-8 h-8 text-blue-500 mb-2" />
+                    <h3 className="text-3xl font-bold text-slate-900">{allUsers.length}</h3>
+                    <p className="text-sm text-slate-500 font-medium">Total Users</p>
                 </CardContent>
             </Card>
             <Card>
-                <CardContent className="p-6 flex items-center justify-between">
-                    <div><p className="text-slate-500 text-sm">Pending Requests</p><h3 className="text-4xl font-bold mt-1 text-slate-800">{stats.pending}</h3></div>
-                    <div className="w-12 h-12 bg-amber-50 rounded-full flex items-center justify-center"><Clock className="w-6 h-6 text-amber-600" /></div>
+                <CardContent className="p-6 flex flex-col items-center justify-center text-center">
+                    <Database className="w-8 h-8 text-indigo-500 mb-2" />
+                    <h3 className="text-3xl font-bold text-slate-900">{stats.totalArts}</h3>
+                    <p className="text-sm text-slate-500 font-medium">Total ARTs</p>
                 </CardContent>
             </Card>
-             <Card>
-                <CardContent className="p-6 flex items-center justify-between">
-                    <div><p className="text-slate-500 text-sm">Total Employees</p><h3 className="text-4xl font-bold mt-1 text-slate-800">{stats.totalEmployees}</h3></div>
-                    <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center"><Users className="w-6 h-6 text-blue-600" /></div>
+            <Card>
+                <CardContent className="p-6 flex flex-col items-center justify-center text-center">
+                    <Briefcase className="w-8 h-8 text-emerald-500 mb-2" />
+                    <h3 className="text-3xl font-bold text-slate-900">{stats.totalTeams}</h3>
+                    <p className="text-sm text-slate-500 font-medium">Total Teams</p>
                 </CardContent>
             </Card>
-        </div>
-
-        <div className="space-y-8">
-            {pendingAdmins.length > 0 && (
-                <RequestList title="Pending Admin Access" requests={pendingAdmins} onApprove={handleApprove} onReject={handleReject} color="purple" />
-            )}
-            {pendingManagers.length > 0 && (
-                <RequestList title="Pending Art Manager Access" requests={pendingManagers} onApprove={handleApprove} onReject={handleReject} color="indigo" />
-            )}
-
-            {pendingRequests.length === 0 && (
-                <div className="text-center py-10 bg-white border border-dashed rounded-3xl text-slate-400">
-                    No pending management requests at this time.
-                </div>
-            )}
-
-            <Card className="rounded-[2rem] overflow-hidden border-slate-200">
-                <CardHeader className="bg-slate-50/50 border-b border-slate-100">
-                    <CardTitle className="text-lg flex items-center gap-2"><Users className="w-5 h-5 text-blue-600"/> Authorized Personnel</CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                    <div className="divide-y divide-slate-100">
-                        {managementTeam.map((mgr) => (
-                            <div key={mgr.id} className="flex justify-between items-center p-4 hover:bg-slate-50 transition-colors">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-600 uppercase text-xs">
-                                        {mgr.firstName.charAt(0)}{mgr.lastName.charAt(0)}
-                                    </div>
-                                    <div>
-                                        <p className="font-bold text-slate-900">{mgr.firstName} {mgr.lastName}</p>
-                                        <p className="text-[10px] text-slate-500 uppercase font-medium tracking-wider">
-                                            {mgr.role === 'art-manager' ? 'Art Manager' : 'Administrator'}
-                                        </p>
-                                    </div>
-                                </div>
-                                <div>
-                                    <Badge 
-                                        variant="outline" 
-                                        className={`text-[10px] font-normal ${mgr.role === 'admin' ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-indigo-50 text-indigo-700 border-indigo-100'}`}
-                                    >
-                                        {mgr.role === 'admin' ? (
-                                            <span className="flex items-center gap-1"><ShieldCheck className="w-3 h-3" /> Admin</span>
-                                        ) : (
-                                            // FIX: Briefcase is now defined and imported
-                                            <span className="flex items-center gap-1"><Briefcase className="w-3 h-3" /> Art Manager</span>
-                                        )}
-                                    </Badge>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
+            <Card>
+                <CardContent className="p-6 flex flex-col items-center justify-center text-center">
+                    <Award className="w-8 h-8 text-amber-500 mb-2" />
+                    <h3 className="text-3xl font-bold text-slate-900">{stats.totalNoms}</h3>
+                    <p className="text-sm text-slate-500 font-medium">All-Time Nominations</p>
                 </CardContent>
             </Card>
         </div>
+
       </div>
     </div>
   );
 };
-
-const RequestList = ({ title, requests, onApprove, onReject, color }: any) => (
-    <Card className={`border-${color}-200 bg-${color}-50/30 rounded-[2rem] overflow-hidden`}>
-        <CardHeader className="pb-3 border-b border-white/50"><CardTitle className={`text-lg text-${color}-800 flex items-center gap-2`}>{title} <Badge className={`bg-${color}-100 text-${color}-700 border-0`}>{requests.length}</Badge></CardTitle></CardHeader>
-        <CardContent className="space-y-3 p-4">
-            {requests.map((req: any) => (
-                <div key={req.id} className="flex justify-between items-center p-4 bg-white rounded-2xl border shadow-sm">
-                    <div className="flex items-center gap-3">
-                        <div className={`w-12 h-12 rounded-full bg-${color}-100 text-${color}-700 flex items-center justify-center font-bold`}>{req.firstName.charAt(0)}</div>
-                        <div><p className="font-bold text-slate-900">{req.firstName} {req.lastName}</p><span className="text-xs text-slate-400 font-medium">Requested access via portal</span></div>
-                    </div>
-                    <div className="flex gap-2">
-                        <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50" onClick={() => onReject(req.id)}><X className="w-4 h-4 mr-1"/> Decline</Button>
-                        <Button size="sm" className={`bg-${color}-600 hover:bg-${color}-700 text-white shadow-md`} onClick={() => onApprove(req.id)}><Check className="w-4 h-4 mr-1"/> Approve Access</Button>
-                    </div>
-                </div>
-            ))}
-        </CardContent>
-    </Card>
-);
 
 export default AdminDashboard;

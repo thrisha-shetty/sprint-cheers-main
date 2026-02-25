@@ -1,260 +1,235 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Loader2, Sparkles, ArrowRight, LockKeyhole, User, ShieldCheck, Briefcase, ChevronLeft } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Sparkles, ShieldAlert, CheckCircle2, ArrowLeft, ArrowRight, Train, Users, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { auth, UserRole } from "@/lib/localStorage";
 
 const Login = () => {
   const navigate = useNavigate();
-  const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
+  const [searchParams] = useSearchParams();
+  
+  // If null, we show the 3 cards. If set, we show the login form.
+  const urlRole = searchParams.get("role") as UserRole;
+  const [selectedRole, setSelectedRole] = useState<UserRole | null>(urlRole || null);
+  
   const [isSignUp, setIsSignUp] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   
-  const [showChangePassword, setShowChangePassword] = useState(false);
-  const [tempUserId, setTempUserId] = useState<string | null>(null);
-  const [newPassword, setNewPassword] = useState("");
-  
-  const [formData, setFormData] = useState({
-    firstName: "",
-    lastName: "",
-    password: "",
-  });
+  // Fields (ALL roles use Full Name for Sign In now)
+  const [fullName, setFullName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [password, setPassword] = useState("");
 
-  // --- API PART (Preserved) ---
-  const [data, setData] = useState<any>([]);
-  const handleClick = () => {
-    fetch("http://127.0.0.1:8000/api/login/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_login: "tina.rodriguez", password: "Tina@123" })
-    })
-      .then(response => response.json())
-      .then(result => setData(result))
-      .catch(error => console.log(error));
-    console.log(data);
-  };
-  // ----------------------------------------
-
-  const handleRoleSelect = (role: UserRole) => {
-    setSelectedRole(role);
-    setIsSignUp(false); 
-    setFormData({ firstName: "", lastName: "", password: "" });
-  };
-
-  // MAIN AUTH HANDLER
-  const handleAuth = async (e: React.FormEvent) => {
+  const handleAuth = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedRole) return;
-    
-    setIsLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 800));
 
-    try {
-        if (isSignUp) {
-            // REGISTER
-            const result = auth.signup(formData.firstName, formData.lastName, formData.password, selectedRole);
-            if (result.success) {
-                const approver = selectedRole === 'employee' ? 'Art Manager' : 'Admin';
-                toast.success("Request Sent", { description: `Please wait for ${approver} approval.` });
-                setIsSignUp(false); 
-            } else {
-                toast.error("Registration Failed", { description: result.error });
-            }
+    if (isSignUp) {
+      if (!firstName.trim() || !lastName.trim() || !password) {
+          toast.error("Please fill in all fields.");
+          return;
+      }
+      const res = auth.signup(firstName.trim(), lastName.trim(), password, selectedRole);
+      if (res.success) {
+        toast.success(selectedRole === 'admin' ? "Admin Account Created!" : "Request submitted! Please wait for approval.", {
+            icon: <CheckCircle2 className="w-5 h-5 text-green-500" />
+        });
+        setFullName(`${firstName.trim()} ${lastName.trim()}`);
+        setIsSignUp(false); 
+        setPassword(""); 
+      } else {
+        toast.error(res.error);
+      }
+    } else {
+      // ALL ROLES (Admin, Manager, Employee) now use Full Name for Sign In
+      if (!fullName.trim() || !password) {
+          toast.error("Please provide your Full Name and Password.");
+          return;
+      }
+      
+      const nameParts = fullName.trim().split(" ");
+      const first = nameParts[0];
+      const last = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "";
+      
+      const res = auth.login(first, last, password, selectedRole);
+
+      if (res.success) {
+        toast.success("Welcome back!");
+        if (selectedRole === 'admin') navigate("/admin");
+        else if (selectedRole === 'art-manager') navigate("/manager");
+        else navigate("/home");
+      } else {
+        if (res.error === 'Account pending') {
+            toast.error("Approval Pending: Waiting for your Train Manager to accept your request.", {
+                icon: <ShieldAlert className="w-5 h-5 text-amber-500" />,
+                duration: 5000
+            });
         } else {
-            // LOGIN
-            const result = auth.login(formData.firstName, formData.lastName, formData.password, selectedRole);
-            if (result.success && result.user) {
-                if (result.user.needsPasswordChange) {
-                    setTempUserId(result.user.id);
-                    setShowChangePassword(true);
-                    toast.info("Security Update Required", { description: "Please set a new password." });
-                } else {
-                    toast.success("Welcome back!");
-                    // handleClick(); // Optional: Trigger your API here if needed
-                    
-                    if (selectedRole === 'admin') navigate('/admin');
-                    else if (selectedRole === 'art-manager') navigate('/manager');
-                    else navigate('/home');
-                }
-            } else {
-                toast.error("Login Failed", { description: result.error });
-            }
+            toast.error(res.error);
         }
-    } catch(e) {
-        toast.error("An unexpected error occurred");
-    } finally {
-        setIsLoading(false);
+      }
     }
   };
 
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if(!tempUserId) return;
-    setIsLoading(true);
-    
-    await new Promise(resolve => setTimeout(resolve, 800));
-
-    const result = auth.changePassword(tempUserId, newPassword);
-    
-    if (result.success) {
-      toast.success("Password Updated", { description: "You are now logged in." });
-      
-      if (selectedRole === 'admin') navigate('/admin');
-      else if (selectedRole === 'art-manager') navigate('/manager');
-      else navigate('/home');
-    } else {
-      toast.error("Error updating password");
-    }
-    setIsLoading(false);
+  const getRoleTitle = () => {
+    if (selectedRole === 'admin') return 'Admin Portal';
+    if (selectedRole === 'art-manager') return 'Manager Portal';
+    return 'Employee Portal';
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 overflow-hidden relative">
-       {/* Background */}
-       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-600/10 blur-3xl" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-purple-600/10 blur-3xl" />
-      </div>
-
-      <div className="w-full max-w-5xl relative z-10">
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 relative overflow-hidden">
+      
+      {/* Decorative Background */}
+      <div className="absolute top-0 left-0 w-full h-[400px] bg-gradient-to-br from-indigo-50 via-white to-purple-50 z-0" />
+      
+      <div className="w-full relative z-10 flex flex-col items-center">
         
-        {/* Header */}
-        <div className="text-center mb-12 animate-in fade-in slide-in-from-top-4">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600 text-white mb-6 shadow-lg shadow-indigo-500/30">
-              <Sparkles className="w-8 h-8" />
+        {/* Logo Section */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-600 text-white shadow-lg mb-4">
+            <Sparkles className="w-7 h-7" />
           </div>
-          <h1 className="text-4xl font-bold text-slate-900 tracking-tight">Elevate</h1>
-          <p className="text-slate-500 mt-2 text-lg">The Employee Recognition Platform</p>
+          <h1 className="text-3xl font-extrabold text-slate-900 mb-1">Elevate</h1>
+          <p className="text-slate-500 text-sm">The Employee Recognition Platform</p>
         </div>
 
+        {/* STATE 1: The 3 Cards Selection */}
         {!selectedRole ? (
-            /* ROLE SELECTION CARDS */
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in zoom-in-95 duration-500">
-                <Card
-                    title="Admin"
-                    icon={<ShieldCheck className="w-10 h-10" />} 
-                    desc="System oversight & Manager approval" 
-                    color="purple"
-                    onClick={() => handleRoleSelect('admin')} 
-                />
-                <Card 
-                    title="Art Manager" 
-                    icon={<Briefcase className="w-10 h-10" />} 
-                    desc="Manage Teams, Sprints & Employees" 
-                    color="indigo"
-                    onClick={() => handleRoleSelect('art-manager')} 
-                />
-                <Card 
-                    title="Employee" 
-                    icon={<User className="w-10 h-10" />} 
-                    desc="Join a team & Nominate peers" 
-                    color="emerald"
-                    onClick={() => handleRoleSelect('employee')} 
-                />
-            </div>
-        ) : (
-            /* LOGIN / SIGNUP FORM */
-            <div className="max-w-md mx-auto bg-white p-8 rounded-3xl shadow-2xl border border-slate-100 relative animate-in fade-in slide-in-from-right-8">
-                <button 
-                    onClick={() => { setSelectedRole(null); setIsSignUp(false); setShowChangePassword(false); }}
-                    className="absolute top-8 left-8 text-slate-400 hover:text-slate-600 transition-colors"
-                >
-                    <ChevronLeft className="w-6 h-6" />
-                </button>
-                
-                <div className="text-center mb-8 pt-4">
-                    <h2 className="text-2xl font-bold text-slate-900 capitalize">
-                        {selectedRole === 'art-manager' ? 'Art Manager' : selectedRole} Portal
-                    </h2>
-                    <p className="text-sm text-slate-500 mt-1">
-                        {showChangePassword ? "Security Update Required" : (isSignUp ? "Submit request for access" : "Enter your credentials")}
-                    </p>
-                </div>
-
-                {showChangePassword ? (
-                    /* PASSWORD CHANGE FORM */
-                    <form onSubmit={handleChangePassword} className="space-y-4">
-                         <div className="text-center mb-4">
-                            <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-2">
-                                <LockKeyhole className="w-6 h-6" />
-                            </div>
-                            <p className="text-xs text-slate-500">Please set a new secure password for your account.</p>
-                        </div>
-                        <div className="space-y-2">
-                            <Label>New Password</Label>
-                            <Input 
-                                type="password" 
-                                placeholder="Enter strong password" 
-                                value={newPassword} 
-                                onChange={e => setNewPassword(e.target.value)} 
-                                required 
-                            />
-                        </div>
-                        <Button type="submit" className="w-full h-11 bg-indigo-600 hover:bg-indigo-700 text-white mt-2" disabled={isLoading}>
-                            {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Update Password & Login"}
-                        </Button>
-                    </form>
-                ) : (
-                    /* NORMAL FORM - This is where the error was */
-                    <form onSubmit={handleAuth} className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label>First Name</Label>
-                                <Input placeholder="John" value={formData.firstName} onChange={e => setFormData({...formData, firstName: e.target.value})} required />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Last Name</Label>
-                                <Input placeholder="Doe" value={formData.lastName} onChange={e => setFormData({...formData, lastName: e.target.value})} required />
-                            </div>
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Password</Label>
-                            <Input type="password" placeholder="••••••••" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} required />
-                        </div>
-
-                        <Button type="submit" className="w-full h-11 bg-slate-900 hover:bg-slate-800 text-white mt-4" disabled={isLoading}>
-                            {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : (
-                                <div className="flex items-center gap-2">
-                                    {isSignUp ? "Submit Request" : "Sign In"} <ArrowRight className="w-4 h-4" />
-                                </div>
-                            )}
-                        </Button>
-                    </form>
-                )}
-
-                {!showChangePassword && (
-                    <div className="mt-6 text-center text-sm">
-                        <span className="text-slate-500">{isSignUp ? "Already have access? " : "Need an account? "}</span>
-                        <button onClick={() => setIsSignUp(!isSignUp)} className="font-semibold text-indigo-600 hover:underline">
-                            {isSignUp ? "Sign In" : "Request Access"}
-                        </button>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl w-full animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <Card 
+                className="hover:shadow-xl hover:border-indigo-300 transition-all cursor-pointer group bg-white/95 backdrop-blur-sm"
+                onClick={() => setSelectedRole('employee')}
+            >
+                <CardContent className="p-8 flex flex-col items-center text-center">
+                    <div className="w-16 h-16 rounded-full bg-indigo-50 flex items-center justify-center mb-4 group-hover:bg-indigo-600 group-hover:text-white transition-colors text-indigo-600">
+                        <Users className="w-8 h-8" />
                     </div>
-                )}
-            </div>
-        )}
+                    <h3 className="text-xl font-bold text-slate-800 mb-2">Employee</h3>
+                    <p className="text-sm text-slate-500">Nominate peers, earn badges, and view leaderboards.</p>
+                </CardContent>
+            </Card>
 
+            <Card 
+                className="hover:shadow-xl hover:border-purple-300 transition-all cursor-pointer group bg-white/95 backdrop-blur-sm"
+                onClick={() => setSelectedRole('art-manager')}
+            >
+                <CardContent className="p-8 flex flex-col items-center text-center">
+                    <div className="w-16 h-16 rounded-full bg-purple-50 flex items-center justify-center mb-4 group-hover:bg-purple-600 group-hover:text-white transition-colors text-purple-600">
+                        <Train className="w-8 h-8" />
+                    </div>
+                    <h3 className="text-xl font-bold text-slate-800 mb-2">Train Manager</h3>
+                    <p className="text-sm text-slate-500">Manage teams, approve requests, and control sprints.</p>
+                </CardContent>
+            </Card>
+
+            <Card 
+                className="hover:shadow-xl hover:border-slate-400 transition-all cursor-pointer group bg-white/95 backdrop-blur-sm"
+                onClick={() => setSelectedRole('admin')}
+            >
+                <CardContent className="p-8 flex flex-col items-center text-center">
+                    <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mb-4 group-hover:bg-slate-800 group-hover:text-white transition-colors text-slate-600">
+                        <Shield className="w-8 h-8" />
+                    </div>
+                    <h3 className="text-xl font-bold text-slate-800 mb-2">System Admin</h3>
+                    <p className="text-sm text-slate-500">Global oversight, metrics, and ultimate access control.</p>
+                </CardContent>
+            </Card>
+          </div>
+        ) : (
+          /* STATE 2: The Login Form */
+          <Card className="w-full max-w-md shadow-2xl border-0 rounded-3xl bg-white animate-in fade-in zoom-in-95 duration-300">
+            <CardHeader className="relative pb-4 pt-8">
+              
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="absolute left-4 top-6 text-slate-400 hover:text-slate-600" 
+                onClick={() => {
+                    if (isSignUp) {
+                        setIsSignUp(false);
+                    } else {
+                        setSelectedRole(null); // Return to 3 cards
+                        setPassword("");
+                    }
+                }}
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </Button>
+
+              <CardTitle className="text-2xl text-center text-slate-900 font-bold">
+                {isSignUp ? "Create Account" : getRoleTitle()}
+              </CardTitle>
+              <CardDescription className="text-center text-sm mt-1 text-slate-500">
+                {isSignUp ? "Submit your details to join." : "Sign in with your credentials."}
+              </CardDescription>
+            </CardHeader>
+            
+            <CardContent className="px-8 pb-8">
+              <form onSubmit={handleAuth} className="space-y-4">
+                
+                {/* Dynamic Inputs */}
+                {isSignUp ? (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-800">First Name</label>
+                      <Input placeholder="John" value={firstName} onChange={(e) => setFirstName(e.target.value)} required className="h-11 border-slate-200" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-800">Last Name</label>
+                      <Input placeholder="Doe" value={lastName} onChange={(e) => setLastName(e.target.value)} required className="h-11 border-slate-200" />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-800">Full Name</label>
+                    <Input placeholder="John Doe" value={fullName} onChange={(e) => setFullName(e.target.value)} required className="h-11 border-slate-200" />
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-800">Password</label>
+                  <Input type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required className="h-11 border-slate-200" />
+                </div>
+                
+                {/* Dynamic Buttons & Footers */}
+                {isSignUp ? (
+                   <>
+                      <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-md py-6 mt-2 rounded-xl text-md font-bold">
+                          Create Account
+                      </Button>
+                      <div className="text-center mt-4 pt-2 space-y-2">
+                          <p className="text-sm font-bold text-slate-800">Request Access</p>
+                          <p className="text-sm text-slate-500">
+                            Already have an account? <button type="button" onClick={() => { setIsSignUp(false); setPassword(""); }} className="text-indigo-600 font-semibold hover:underline">Sign In</button>
+                          </p>
+                      </div>
+                   </>
+                ) : (
+                   <>
+                      <Button type="submit" className="w-full bg-slate-900 hover:bg-slate-800 text-white shadow-md py-6 mt-2 rounded-xl text-md font-bold flex items-center justify-center gap-2 transition-all">
+                        Sign In <ArrowRight className="w-4 h-4" />
+                      </Button>
+
+                      {/* Explicit Create Here Link for ALL roles */}
+                      <div className="text-center mt-6">
+                          <p className="text-sm text-slate-500">
+                            No Account? <button type="button" onClick={() => { setIsSignUp(true); setPassword(""); }} className="text-indigo-600 font-semibold hover:underline">Create Here</button>
+                          </p>
+                      </div>
+                   </>
+                )}
+                
+              </form>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );
-};
-
-// Helper Card Component
-const Card = ({ title, icon, desc, color, onClick }: any) => {
-    const bgColors: any = { purple: 'bg-purple-50 text-purple-600 border-purple-100', indigo: 'bg-indigo-50 text-indigo-600 border-indigo-100', emerald: 'bg-emerald-50 text-emerald-600 border-emerald-100' };
-    const hoverColors: any = { purple: 'group-hover:border-purple-500', indigo: 'group-hover:border-indigo-500', emerald: 'group-hover:border-emerald-500' };
-
-    return (
-        <div onClick={onClick} className={`bg-white p-8 rounded-3xl border border-slate-200 shadow-sm cursor-pointer transition-all duration-300 hover:shadow-xl hover:-translate-y-1 group ${hoverColors[color]}`}>
-            <div className={`w-20 h-20 rounded-2xl flex items-center justify-center mb-6 mx-auto transition-colors ${bgColors[color]}`}>
-                {icon}
-            </div>
-            <h3 className="text-2xl font-bold text-slate-900 text-center mb-2">{title}</h3>
-            <p className="text-sm text-slate-500 text-center leading-relaxed">{desc}</p>
-        </div>
-    );
 };
 
 export default Login;

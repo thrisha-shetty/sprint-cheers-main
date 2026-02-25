@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Trophy, Lock, CalendarRange, Clock } from "lucide-react";
-import { Employee, Badge } from "@/types/employee";
-import { employeeStorage, nominationStorage } from "@/lib/localStorage";
+import { Badge } from "@/components/ui/badge";
+import { ArrowLeft, Trophy, Lock, CalendarRange, Clock, Users } from "lucide-react";
+import { Employee, Badge as BadgeType } from "@/types/employee";
+import { employeeStorage, nominationStorage, artManagerActions, auth } from "@/lib/localStorage";
 import { LeaderboardCard } from "@/components/LeaderboardCard"; 
 import { BadgeDetailModal } from "@/components/BadgeDetailModal";
 
-// Constants matching localStorage logic
 const SCALING_FACTOR = 3.0;
 const BASE_VOTE_VALUE = 50;
 
@@ -20,17 +20,22 @@ interface SprintCard {
   status: 'active' | 'completed' | 'locked';
 }
 
+interface TeamLeaderboard {
+  teamId: string;
+  teamName: string;
+  performers: Employee[];
+}
+
 const Leaderboard = () => {
   const navigate = useNavigate();
-  const [employees, setEmployees] = useState<Employee[]>([]);
   const [sprints, setSprints] = useState<SprintCard[]>([]);
   const [selectedSprintId, setSelectedSprintId] = useState<number>(1);
+  const [teamLeaderboards, setTeamLeaderboards] = useState<TeamLeaderboard[]>([]);
   
-  const [selectedBadge, setSelectedBadge] = useState<Badge | null>(null);
+  const [selectedBadge, setSelectedBadge] = useState<BadgeType | null>(null);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>("");
   const [isDetailOpen, setIsDetailOpen] = useState(false);
 
-  // 1. Initialize Sprints for the Current Year
   useEffect(() => {
     const today = new Date();
     const currentYear = today.getFullYear();
@@ -78,7 +83,6 @@ const Leaderboard = () => {
 
   }, []);
 
-  // 2. Fetch & Filter Data when Sprint Selection Changes
   useEffect(() => {
     if (sprints.length === 0) return;
 
@@ -86,60 +90,66 @@ const Leaderboard = () => {
     if (!currentSprint) return;
 
     const allEmployees = employeeStorage.getEmployees();
+    const user = auth.getCurrentUser();
 
-    // Dynamically calculate scores for the selected sprint
-    const sprintEmployees = allEmployees.map(emp => {
-      const allBadges = nominationStorage.getNominationsForEmployee(emp.id);
-      
-      // Filter badges: Must be within the selected sprint's date range
-      const sprintBadges = allBadges.filter(badge => {
-        const badgeDate = new Date(badge.timestamp);
-        return badgeDate >= currentSprint.startDate && badgeDate <= currentSprint.endDate;
-      });
+    let relevantTeams = artManagerActions.getTeams();
+    
+    if (user && user.role === 'employee' && user.teamId) {
+        relevantTeams = relevantTeams.filter(t => t.id === user.teamId);
+    } else if (user && user.role === 'art-manager') {
+        const myArts = artManagerActions.getARTs().filter(a => a.managerId === user.id);
+        const myArtIds = myArts.map(a => a.id);
+        relevantTeams = relevantTeams.filter(t => myArtIds.includes(t.artId));
+    }
 
-      // Recalculate Score using Damped Logic
-      // MATCHING LOGIC WITH HOME PAGE: Using Global Team Size (25)
-      const teamSize = allEmployees.length; 
-      const potentialVoters = Math.max(1, teamSize - 1);
-      const fairnessMultiplier = SCALING_FACTOR / Math.sqrt(potentialVoters);
-      
-      let sprintScore = 0;
-      sprintBadges.forEach(() => {
-        sprintScore += Math.round(BASE_VOTE_VALUE * fairnessMultiplier);
-      });
+    const boards = relevantTeams.map(team => {
+        const teamEmps = allEmployees.filter(e => e.teamId === team.id);
+        
+        const sprintEmployees = teamEmps.map(emp => {
+            const allBadges = nominationStorage.getNominationsForEmployee(emp.id);
+            const sprintBadges = allBadges.filter(badge => {
+                const badgeDate = new Date(badge.timestamp);
+                return badgeDate >= currentSprint.startDate && badgeDate <= currentSprint.endDate;
+            });
 
-      return {
-        ...emp,
-        badges: sprintBadges, 
-        totalScore: sprintScore 
-      };
+            // FIXED MATH: Subtract 1 because employee cannot vote for self
+            const empTeamSize = teamEmps.length;
+            const potentialVoters = Math.max(1, empTeamSize - 1);
+            const fairnessMultiplier = SCALING_FACTOR / Math.sqrt(potentialVoters);
+            
+            let sprintScore = 0;
+            sprintBadges.forEach(() => {
+                sprintScore += Math.round(BASE_VOTE_VALUE * fairnessMultiplier);
+            });
+
+            return { ...emp, badges: sprintBadges, totalScore: sprintScore };
+        });
+
+        // Top 3 for this specific team
+        const sorted = sprintEmployees
+            .filter(e => e.totalScore > 0)
+            .sort((a, b) => b.totalScore - a.totalScore || b.badges.length - a.badges.length || a.name.localeCompare(b.name))
+            .slice(0, 3);
+
+        return {
+            teamId: team.id,
+            teamName: team.name,
+            performers: sorted
+        };
     });
 
-    // Rank and Filter Top 10
-    const sorted = sprintEmployees
-      .filter(e => e.totalScore > 0) 
-      .sort((a, b) => {
-        if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
-        if (b.badges.length !== a.badges.length) return b.badges.length - a.badges.length;
-        return a.name.localeCompare(b.name);
-      })
-      .slice(0, 10); 
-
-    setEmployees(sorted);
+    setTeamLeaderboards(boards);
 
   }, [selectedSprintId, sprints]);
 
-  const handleBadgeClick = (badge: Badge, employeeId: string) => {
+  const handleBadgeClick = (badge: BadgeType, employeeId: string) => {
     setSelectedBadge(badge);
     setSelectedEmployeeId(employeeId);
     setIsDetailOpen(true);
   };
 
-  let currentRank = 1;
-
   return (
     <div className="min-h-screen bg-slate-50/50 flex flex-col">
-      {/* Header */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center gap-4 mb-6">
@@ -155,7 +165,6 @@ const Leaderboard = () => {
             </div>
           </div>
 
-          {/* SPRINT CARDS GRID */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {sprints.map((sprint) => {
               const isLocked = sprint.status === 'locked';
@@ -206,40 +215,60 @@ const Leaderboard = () => {
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8 max-w-3xl flex-1">
-        {/* Results Header */}
+      <main className="container mx-auto px-4 py-8 max-w-5xl flex-1">
         <div className="mb-6 flex items-center justify-between">
            <h2 className="text-lg font-bold text-slate-800">
-             Top 10 Performers <span className="text-slate-400 font-normal mx-2">|</span> <span className="text-indigo-600">{sprints.find(s => s.id === selectedSprintId)?.title}</span>
+             Top Performers by Team <span className="text-slate-400 font-normal mx-2">|</span> <span className="text-indigo-600">{sprints.find(s => s.id === selectedSprintId)?.title}</span>
            </h2>
         </div>
 
-        {employees.length === 0 ? (
+        {teamLeaderboards.length === 0 ? (
            <div className="flex flex-col items-center justify-center py-16 bg-white rounded-xl border border-dashed border-slate-300">
              <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4">
                 <Trophy className="w-8 h-8 text-slate-300" />
              </div>
              <h3 className="text-lg font-medium text-slate-900">Leaderboard Empty</h3>
              <p className="text-sm text-muted-foreground mt-1 max-w-xs text-center">
-               No nominations have been cast for {sprints.find(s => s.id === selectedSprintId)?.title} yet. Be the first to recognize a peer!
+               No teams have been created or no data is available for this period.
              </p>
            </div>
         ) : (
-          <div className="space-y-4">
-            {employees.map((employee, index) => {
-              // Dense Ranking Logic
-              if (index > 0 && employee.totalScore < employees[index - 1].totalScore) {
-                currentRank++;
-              }
-              return (
-                <LeaderboardCard 
-                  key={employee.id}
-                  employee={employee}
-                  rank={currentRank}
-                  onBadgeClick={handleBadgeClick}
-                />
-              );
-            })}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {teamLeaderboards.map(board => (
+               <div key={board.teamId} className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                 <div className="flex items-center justify-between mb-5 border-b border-slate-100 pb-4">
+                     <h3 className="font-bold text-xl text-slate-800 flex items-center gap-2">
+                         <Users className="w-5 h-5 text-indigo-500" />
+                         {board.teamName}
+                     </h3>
+                     <Badge variant="secondary" className="bg-indigo-50 text-indigo-700">Top 3</Badge>
+                 </div>
+                 
+                 {board.performers.length === 0 ? (
+                    <div className="text-center py-8 text-slate-400 bg-slate-50 rounded-xl border border-dashed text-sm">
+                        No activity yet for {board.teamName}.
+                    </div>
+                 ) : (
+                    <div className="space-y-4">
+                      {board.performers.map((employee, index) => {
+                        const currentRank = index === 0 ? 1 : 
+                             (employee.totalScore === board.performers[index-1].totalScore ? 
+                                (index === 1 ? 1 : (board.performers[1].totalScore === board.performers[0].totalScore ? 1 : 2))
+                              : index + 1);
+
+                        return (
+                          <LeaderboardCard 
+                            key={employee.id}
+                            employee={employee}
+                            rank={currentRank}
+                            onBadgeClick={handleBadgeClick}
+                          />
+                        );
+                      })}
+                    </div>
+                 )}
+               </div>
+            ))}
           </div>
         )}
       </main>
