@@ -11,13 +11,11 @@ const Login = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   
-  // If null, we show the 3 cards. If set, we show the login form.
   const urlRole = searchParams.get("role") as UserRole;
   const [selectedRole, setSelectedRole] = useState<UserRole | null>(urlRole || null);
   
   const [isSignUp, setIsSignUp] = useState(false);
   
-  // Fields (ALL roles use Full Name for Sign In now)
   const [fullName, setFullName] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -44,17 +42,23 @@ const Login = () => {
         toast.error(res.error);
       }
     } else {
-      // ALL ROLES (Admin, Manager, Employee) now use Full Name for Sign In
-      if (!fullName.trim() || !password) {
-          toast.error("Please provide your Full Name and Password.");
-          return;
+      let res;
+      if (selectedRole === 'admin') {
+          if (!firstName.trim() || !lastName.trim() || !password) {
+              toast.error("Please provide First Name, Last Name and Password.");
+              return;
+          }
+          res = auth.login(firstName.trim(), lastName.trim(), password, selectedRole);
+      } else {
+          if (!fullName.trim() || !password) {
+              toast.error("Please provide your Full Name and Password.");
+              return;
+          }
+          const nameParts = fullName.trim().split(" ");
+          const first = nameParts[0];
+          const last = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "";
+          res = auth.login(first, last, password, selectedRole);
       }
-      
-      const nameParts = fullName.trim().split(" ");
-      const first = nameParts[0];
-      const last = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "";
-      
-      const res = auth.login(first, last, password, selectedRole);
 
       if (res.success) {
         toast.success("Welcome back!");
@@ -63,8 +67,15 @@ const Login = () => {
         else navigate("/home");
       } else {
         if (res.error === 'Account pending') {
-            toast.error("Approval Pending: Waiting for your Train Manager to accept your request.", {
-                icon: <ShieldAlert className="w-5 h-5 text-amber-500" />,
+            toast.error("Approval Pending", {
+                description: "Waiting for your Train Manager to accept your request.",
+                icon: <Clock className="w-5 h-5 text-amber-500" />,
+                duration: 5000
+            });
+        } else if (res.error === 'Account is not active. Please contact the administrator.') {
+            toast.error("Account Disabled", {
+                description: "Your account is not active. Please contact the administrator.",
+                icon: <ShieldAlert className="w-5 h-5 text-red-500" />,
                 duration: 5000
             });
         } else {
@@ -83,12 +94,10 @@ const Login = () => {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 relative overflow-hidden">
       
-      {/* Decorative Background */}
       <div className="absolute top-0 left-0 w-full h-[400px] bg-gradient-to-br from-indigo-50 via-white to-purple-50 z-0" />
       
       <div className="w-full relative z-10 flex flex-col items-center">
         
-        {/* Logo Section */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-600 text-white shadow-lg mb-4">
             <Sparkles className="w-7 h-7" />
@@ -97,7 +106,6 @@ const Login = () => {
           <p className="text-slate-500 text-sm">The Employee Recognition Platform</p>
         </div>
 
-        {/* STATE 1: The 3 Cards Selection */}
         {!selectedRole ? (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl w-full animate-in fade-in slide-in-from-bottom-4 duration-500">
             <Card 
@@ -140,7 +148,6 @@ const Login = () => {
             </Card>
           </div>
         ) : (
-          /* STATE 2: The Login Form */
           <Card className="w-full max-w-md shadow-2xl border-0 rounded-3xl bg-white animate-in fade-in zoom-in-95 duration-300">
             <CardHeader className="relative pb-4 pt-8">
               
@@ -152,7 +159,7 @@ const Login = () => {
                     if (isSignUp) {
                         setIsSignUp(false);
                     } else {
-                        setSelectedRole(null); // Return to 3 cards
+                        setSelectedRole(null); 
                         setPassword("");
                     }
                 }}
@@ -171,8 +178,7 @@ const Login = () => {
             <CardContent className="px-8 pb-8">
               <form onSubmit={handleAuth} className="space-y-4">
                 
-                {/* Dynamic Inputs */}
-                {isSignUp ? (
+                {isSignUp || (!isSignUp && selectedRole === 'admin') ? (
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="text-xs font-bold text-slate-800">First Name</label>
@@ -195,7 +201,6 @@ const Login = () => {
                   <Input type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required className="h-11 border-slate-200" />
                 </div>
                 
-                {/* Dynamic Buttons & Footers */}
                 {isSignUp ? (
                    <>
                       <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-md py-6 mt-2 rounded-xl text-md font-bold">
@@ -214,7 +219,6 @@ const Login = () => {
                         Sign In <ArrowRight className="w-4 h-4" />
                       </Button>
 
-                      {/* Explicit Create Here Link for ALL roles */}
                       <div className="text-center mt-6">
                           <p className="text-sm text-slate-500">
                             No Account? <button type="button" onClick={() => { setIsSignUp(true); setPassword(""); }} className="text-indigo-600 font-semibold hover:underline">Create Here</button>
@@ -231,5 +235,11 @@ const Login = () => {
     </div>
   );
 };
+
+// Fix React warning regarding Clock icon by adding a quick import above
+import { Clock as ClockIcon } from 'lucide-react';
+const FixedLogin = () => {
+    return <Login />
+}
 
 export default Login;

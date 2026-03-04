@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Users, Briefcase, Calendar, Award, Trash2, Plus, Check, X, Clock, Map, UserMinus, Trophy, LogOut, Settings2, Edit } from "lucide-react";
+import { Users, Briefcase, Calendar, Award, Trash2, Plus, Check, X, Clock, Map, UserMinus, Trophy, LogOut, Settings2, Edit, Ban, CheckCircle } from "lucide-react";
 import { auth, artManagerActions, adminActions, sprintStorage, awardStorage, employeeStorage, nominationStorage, StoredUser, ART, Team, StoredSprint, StoredAward, STORAGE_KEYS } from "@/lib/localStorage";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -28,25 +28,22 @@ const ManagerDashboard = () => {
   const [sprints, setSprints] = useState<StoredSprint[]>([]);
   const [awards, setAwards] = useState<StoredAward[]>([]);
 
-  // Form States
   const [artName, setArtName] = useState("");
   const [deptName, setDeptName] = useState("");
   const [teamName, setTeamName] = useState("");
   const [teamDesc, setTeamDesc] = useState("");
   
-  // Sprint Custom Dates
   const [sprintTitle, setSprintTitle] = useState("");
   const [sprintStartDate, setSprintStartDate] = useState("");
   const [sprintEndDate, setSprintEndDate] = useState("");
 
   const [awardName, setAwardName] = useState("");
   
-  // Specific Selectors & Modals
   const [approvalArtSelections, setApprovalArtSelections] = useState<Record<string, string>>({});
   const [selectedArtForTeam, setSelectedArtForTeam] = useState("");
   const [selectedArtToUpdate, setSelectedArtToUpdate] = useState(""); 
   const [managingTeam, setManagingTeam] = useState<Team | null>(null);
-  const [isArtUpdateModalOpen, setIsArtUpdateModalOpen] = useState(false); // FIXED: Update ART is now a clean modal
+  const [isArtUpdateModalOpen, setIsArtUpdateModalOpen] = useState(false); 
 
   useEffect(() => {
     const user = auth.getCurrentUser('art-manager');
@@ -65,12 +62,10 @@ const ManagerDashboard = () => {
     const myArts = allArts.filter(a => a.managerId === managerId);
     setArts(myArts);
 
-    if (myArts.length > 0) {
-        const targetId = selectedArtToUpdate || myArts[0].id;
-        const art = myArts.find(a => a.id === targetId) || myArts[0];
-        setSelectedArtToUpdate(art.id);
-        setArtName(art.name);
-        setDeptName(art.department);
+    if (myArts.length > 0 && !selectedArtToUpdate) {
+        setSelectedArtToUpdate(myArts[0].id);
+        setArtName(myArts[0].name);
+        setDeptName(myArts[0].department);
     }
 
     const allTeams = artManagerActions.getTeams();
@@ -130,6 +125,23 @@ const ManagerDashboard = () => {
     }
   };
 
+  // NEW: Revoke logic cleans up the team assignment directly
+  const handleRevokeAccess = (id: string) => {
+    if(adminActions.rejectUser(id)) {
+        // Automatically remove them from the team so they lose dashboard access and drop off leaderboards
+        artManagerActions.removeEmployeeFromTeam(id);
+        toast.success("Employee access has been revoked.");
+        loadData(currentUser.id);
+    }
+  };
+
+  const handleRestoreAccess = (id: string) => {
+    if(adminActions.approveUser(id)) {
+        toast.success("Employee access restored.");
+        loadData(currentUser.id);
+    }
+  };
+
   const handleCreateART = (e: React.FormEvent) => {
     e.preventDefault();
     artManagerActions.createART(artName, deptName, currentUser.id);
@@ -148,6 +160,7 @@ const ManagerDashboard = () => {
     if (artIndex !== -1) {
         allArts[artIndex].name = artName;
         allArts[artIndex].department = deptName;
+        allArts[artIndex].updatedAt = new Date().toISOString(); 
         localStorage.setItem(STORAGE_KEYS.ARTS, JSON.stringify(allArts));
         toast.success("ART Details Updated!");
         loadData(currentUser.id);
@@ -253,6 +266,72 @@ const ManagerDashboard = () => {
             </CardContent>
         </Card>
 
+        {/* 2. MANAGED EMPLOYEES LIST WITH REVOKE ACCESS */}
+        <Card>
+            <CardHeader><CardTitle className="text-lg flex items-center gap-2 text-slate-800"><Users className="w-5 h-5 text-blue-600"/> Managed Employees</CardTitle></CardHeader>
+            <CardContent>
+                {managedEmployees.length === 0 ? <p className="text-sm text-slate-400 italic">No employees managed yet.</p> :
+                    <div className="space-y-2">
+                        <div className="grid grid-cols-12 text-xs font-bold text-slate-400 uppercase border-b pb-2 px-3">
+                            <div className="col-span-4">Employee Name</div>
+                            <div className="col-span-3">Specific ART</div>
+                            <div className="col-span-2">Status</div>
+                            <div className="col-span-3 text-right">Actions</div>
+                        </div>
+                        <div className="max-h-48 overflow-y-auto pr-2 space-y-2 custom-scrollbar">
+                            {managedEmployees.map(emp => (
+                                <div key={emp.id} className="grid grid-cols-12 items-center p-3 border rounded-lg bg-white hover:bg-slate-50 transition-colors">
+                                    <div className="col-span-4 font-semibold text-slate-900 flex flex-col">
+                                        <span>{emp.firstName} {emp.lastName}</span>
+                                        {emp.createdBy === 'system_dummy' && <span className="text-[10px] text-slate-400 font-normal">Dummy Account</span>}
+                                    </div>
+                                    <div className="col-span-3">
+                                        <Badge variant="outline" className="text-[10px] bg-indigo-50 text-indigo-700 border-indigo-100">
+                                            {arts.find(a => a.id === emp.artId)?.name || 'Assigned'}
+                                        </Badge>
+                                    </div>
+                                    <div className="col-span-2">
+                                        <Badge variant="outline" className={
+                                            emp.status === 'approved' ? 'bg-green-50 text-green-700 border-green-200' :
+                                            emp.status === 'rejected' ? 'bg-red-50 text-red-700 border-red-200' :
+                                            'bg-amber-50 text-amber-700 border-amber-200'
+                                        }>
+                                            {emp.status}
+                                        </Badge>
+                                    </div>
+                                    <div className="col-span-3 text-right flex justify-end">
+                                        {emp.createdBy !== 'system_dummy' && (
+                                            emp.status === 'approved' ? (
+                                                <Button 
+                                                    size="sm" 
+                                                    variant="ghost" 
+                                                    className="h-8 px-2 text-red-600 hover:bg-red-50 hover:text-red-700 transition-colors" 
+                                                    onClick={() => handleRevokeAccess(emp.id)} 
+                                                    title="Revoke Access"
+                                                >
+                                                    <Ban className="w-4 h-4 mr-1 hidden sm:block" /> Disable
+                                                </Button>
+                                            ) : emp.status === 'rejected' ? (
+                                                <Button 
+                                                    size="sm" 
+                                                    variant="ghost" 
+                                                    className="h-8 px-2 text-green-600 hover:bg-green-50 hover:text-green-700 transition-colors" 
+                                                    onClick={() => handleRestoreAccess(emp.id)} 
+                                                    title="Restore Access"
+                                                >
+                                                    <CheckCircle className="w-4 h-4 mr-1 hidden sm:block" /> Restore
+                                                </Button>
+                                            ) : null
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                }
+            </CardContent>
+        </Card>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* SETUP & LIST ARTS */}
             <div className="space-y-6">
@@ -270,6 +349,9 @@ const ManagerDashboard = () => {
                                              <div>
                                                 <p className="text-sm text-indigo-900 font-bold leading-tight">{art.name}</p>
                                                 <p className="text-[11px] text-indigo-600 font-medium">{art.department}</p>
+                                                <p className="text-[9px] text-indigo-400 mt-1 font-mono">
+                                                  Created: {art.createdAt ? new Date(art.createdAt).toLocaleDateString() : 'N/A'} | Updated: {art.updatedAt ? new Date(art.updatedAt).toLocaleDateString() : 'N/A'}
+                                                </p>
                                              </div>
                                          </div>
                                          <Badge className="bg-indigo-200 text-indigo-800 hover:bg-indigo-200 border-0 text-[10px]">Active</Badge>
@@ -278,13 +360,15 @@ const ManagerDashboard = () => {
                             </div>
                         )}
 
-                        {/* FIXED: Replaced inline update form with a clean modal button */}
                         {arts.length > 0 ? (
                             <div className="pt-4 border-t border-slate-100">
                                 <Button 
                                     variant="outline" 
                                     className="w-full text-indigo-600 border-indigo-200 hover:bg-indigo-50"
-                                    onClick={() => setIsArtUpdateModalOpen(true)}
+                                    onClick={() => {
+                                        if(!selectedArtToUpdate && arts.length > 0) handleArtSelection(arts[0].id);
+                                        setIsArtUpdateModalOpen(true);
+                                    }}
                                 >
                                     <Edit className="w-4 h-4 mr-2" /> Update ART Details
                                 </Button>
@@ -424,7 +508,6 @@ const ManagerDashboard = () => {
                             <Input placeholder="e.g. Q3 Release Phase" value={sprintTitle} onChange={e => setSprintTitle(e.target.value)} />
                         </div>
                         
-                        {/* FIXED: Added Start and End Date selection for proper Quarterly Sprints */}
                         <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-1.5">
                                 <label className="text-xs font-bold text-slate-700">Start Date</label>

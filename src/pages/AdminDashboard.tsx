@@ -42,14 +42,14 @@ const AdminDashboard = () => {
 
   const handleApprove = (id: string) => {
     if(adminActions.approveUser(id)) {
-        toast.success("User approved");
+        toast.success("User access approved/restored.");
         loadData();
     }
   };
 
   const handleReject = (id: string) => {
     if(adminActions.rejectUser(id)) {
-        toast.success("User rejected");
+        toast.success("User access has been revoked.");
         loadData();
     }
   };
@@ -143,6 +143,48 @@ const AdminDashboard = () => {
                 </CardContent>
             </Card>
         </div>
+
+        {/* USER DIRECTORY */}
+        <Card>
+            <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2 text-slate-800">
+                    <Users className="w-5 h-5 text-purple-600"/> All Registered Users
+                </CardTitle>
+            </CardHeader>
+            <CardContent>
+                <div className="space-y-2">
+                    <div className="grid grid-cols-12 text-xs font-bold text-slate-400 uppercase border-b pb-2 px-3">
+                        <div className="col-span-5">User</div>
+                        <div className="col-span-4">Role</div>
+                        <div className="col-span-3 text-right">Status</div>
+                    </div>
+                    <div className="max-h-[500px] overflow-y-auto pr-2 space-y-2 custom-scrollbar">
+                        {allUsers.map(user => (
+                            <div key={user.id} className="grid grid-cols-12 items-center p-3 border rounded-lg bg-white hover:bg-slate-50 transition-colors">
+                                <div className="col-span-5 font-semibold text-slate-900 flex flex-col">
+                                    <span>{user.firstName} {user.lastName}</span>
+                                    {user.createdBy === 'system_dummy' && <span className="text-[10px] text-slate-400 font-normal">Dummy Account</span>}
+                                </div>
+                                <div className="col-span-4">
+                                    <Badge variant="secondary" className="text-[10px] bg-slate-100 text-slate-700 uppercase tracking-wider">
+                                        {user.role}
+                                    </Badge>
+                                </div>
+                                <div className="col-span-3 text-right flex justify-end">
+                                    <Badge variant="outline" className={
+                                        user.status === 'approved' ? 'bg-green-50 text-green-700 border-green-200' :
+                                        user.status === 'rejected' ? 'bg-red-50 text-red-700 border-red-200' :
+                                        'bg-amber-50 text-amber-700 border-amber-200'
+                                    }>
+                                        {user.status}
+                                    </Badge>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </CardContent>
+        </Card>
 
       </div>
     </div>

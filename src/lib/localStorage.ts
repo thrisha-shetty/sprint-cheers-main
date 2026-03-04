@@ -1,17 +1,17 @@
 import { Employee, Badge, AwardType } from "@/types/employee";
 
-// VERSION UPDATE: _v69 (Custom Start/End Dates for Sprints & Dynamic Leaderboard fixes)
+// VERSION UPDATE: _v71 (Moved Revoke/Restore logic to Manager Dashboard)
 export const STORAGE_KEYS = {
-  USERS: "sprintwise_users_v69",
-  SESSIONS: "sprintwise_sessions_v69", 
-  ACTIVE_TAB_ROLE: "sprintwise_active_tab_role_v69", 
-  EMPLOYEES: "sprintwise_employees_v69",
-  NOMINATIONS: "sprintwise_nominations_v69",
-  SPRINTS: "sprintwise_sprints_v69",
-  ARTS: "sprintwise_arts_v69",
-  TEAMS: "sprintwise_teams_v69",
-  NOTIFICATIONS: "sprintwise_notifications_v69",
-  AWARDS: "sprintwise_awards_v69",
+  USERS: "sprintwise_users_v71",
+  SESSIONS: "sprintwise_sessions_v71", 
+  ACTIVE_TAB_ROLE: "sprintwise_active_tab_role_v71", 
+  EMPLOYEES: "sprintwise_employees_v71",
+  NOMINATIONS: "sprintwise_nominations_v71",
+  SPRINTS: "sprintwise_sprints_v71",
+  ARTS: "sprintwise_arts_v71",
+  TEAMS: "sprintwise_teams_v71",
+  NOTIFICATIONS: "sprintwise_notifications_v71",
+  AWARDS: "sprintwise_awards_v71",
 };
 
 const BASE_VOTE_VALUE = 50; 
@@ -69,6 +69,8 @@ export interface ART {
   name: string;
   department: string;
   managerId: string;
+  createdAt?: string; 
+  updatedAt?: string; 
 }
 
 export interface Team {
@@ -85,7 +87,6 @@ const safeParse = <T>(key: string, fallback: T): T => {
   } catch { return fallback; }
 };
 
-// PROFESSIONAL DUMMY PROFILES
 const DUMMY_PROFILES = [
   { f: "Carol", l: "Brown", img: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop&crop=face" },
   { f: "David", l: "Miller", img: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop&crop=face" },
@@ -138,7 +139,7 @@ const initializeDefaults = () => {
     localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(defaultEmployees));
 
     localStorage.setItem(STORAGE_KEYS.ARTS, JSON.stringify([
-        { id: defaultArtId, name: "Platform Engineering", department: "Engineering", managerId: "user_manager" }
+        { id: defaultArtId, name: "Platform Engineering", department: "Engineering", managerId: "user_manager", createdAt: now, updatedAt: now }
     ]));
     localStorage.setItem(STORAGE_KEYS.TEAMS, JSON.stringify([
         { id: defaultTeamId, artId: defaultArtId, name: "Frontend Ninjas", description: "Core UI/UX Team" }
@@ -150,7 +151,7 @@ export const auth = {
   getCurrentUser: (targetRole?: UserRole) => {
     const allUsers = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
 
-    const tabUserId = sessionStorage.getItem("sprintwise_tab_user_id_v69");
+    const tabUserId = sessionStorage.getItem("sprintwise_tab_user_id_v71");
     if (tabUserId) {
         const user = allUsers.find(u => u.id === tabUserId);
         if (user && (!targetRole || user.role === targetRole)) {
@@ -209,20 +210,22 @@ export const auth = {
 
     if (!user) return { success: false, error: "Invalid credentials" };
     if (user.role !== selectedRole) return { success: false, error: "Incorrect portal role selected" };
-    if (user.status !== 'approved') return { success: false, error: `Account ${user.status}` };
+    
+    if (user.status === 'pending') return { success: false, error: "Account pending" };
+    if (user.status !== 'approved') return { success: false, error: "Account is not active. Please contact the administrator." };
     
     const sessions = safeParse<Record<string, StoredUser>>(STORAGE_KEYS.SESSIONS, {});
     sessions[selectedRole] = user;
     localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(sessions));
     
-    sessionStorage.setItem("sprintwise_tab_user_id_v69", user.id);
+    sessionStorage.setItem("sprintwise_tab_user_id_v71", user.id);
     sessionStorage.setItem(STORAGE_KEYS.ACTIVE_TAB_ROLE, selectedRole);
     
     return { success: true, user };
   },
   
   logout: (role?: UserRole) => {
-    sessionStorage.removeItem("sprintwise_tab_user_id_v69");
+    sessionStorage.removeItem("sprintwise_tab_user_id_v71");
     const activeRole = role || sessionStorage.getItem(STORAGE_KEYS.ACTIVE_TAB_ROLE) as UserRole;
     if (activeRole) {
         const sessions = safeParse<Record<string, StoredUser>>(STORAGE_KEYS.SESSIONS, {});
@@ -240,7 +243,8 @@ export const artManagerActions = {
       const users = safeParse<StoredUser[]>(STORAGE_KEYS.USERS, []);
       const arts = safeParse<ART[]>(STORAGE_KEYS.ARTS, []);
       const myArtIds = arts.filter(a => a.managerId === managerId).map(a => a.id);
-      return users.filter(u => u.role === 'employee' && u.status === 'approved' && (u.createdBy === managerId || (u.artId && myArtIds.includes(u.artId))));
+      // FIXED: Also fetch 'rejected' employees so the manager can see and restore them
+      return users.filter(u => u.role === 'employee' && (u.status === 'approved' || u.status === 'rejected') && (u.createdBy === managerId || (u.artId && myArtIds.includes(u.artId))));
   },
 
   approveEmployee: (userId: string, artId: string) => {
@@ -302,7 +306,8 @@ export const artManagerActions = {
 
   createART: (name: string, department: string, managerId: string) => {
     const arts = safeParse<ART[]>(STORAGE_KEYS.ARTS, []);
-    arts.push({ id: `art_${Date.now()}`, name, department, managerId });
+    const now = new Date().toISOString();
+    arts.push({ id: `art_${Date.now()}`, name, department, managerId, createdAt: now, updatedAt: now });
     localStorage.setItem(STORAGE_KEYS.ARTS, JSON.stringify(arts));
   },
   getARTs: () => safeParse<ART[]>(STORAGE_KEYS.ARTS, []),
@@ -432,11 +437,9 @@ export const sprintStorage = {
       
       return mySprints;
   },
-  // FIXED: Now takes strictly defined manual Start and End dates for quarterly cycles
   addSprint: (title: string, startDate: string, endDate: string, managerId: string) => {
     const s = safeParse<StoredSprint[]>(STORAGE_KEYS.SPRINTS, []);
     
-    // Auto-complete older active sprints for this exact manager
     s.forEach(sprint => {
         if (sprint.status === 'active' && sprint.managerId === managerId) {
             sprint.status = 'completed';
@@ -444,7 +447,7 @@ export const sprintStorage = {
     });
 
     const endDateTime = new Date(endDate);
-    endDateTime.setHours(23, 59, 59, 999); // Force end of day for the selected end date
+    endDateTime.setHours(23, 59, 59, 999); 
 
     s.push({ 
         id: `sp_${Date.now()}`, 
